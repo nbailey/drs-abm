@@ -1,0 +1,11 @@
+.DS_STORE
+.stxxl
+**/__pycache__/**
+*.pyc
+*.*~
+experiment-log.txt
+local.py
+scripts/
+lib/ModeData/
+output/
+maps/
