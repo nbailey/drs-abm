@@ -40,25 +40,19 @@ class RoutingEngine(object):
         graph_link = self.G.es[link_index]
 
         if use_uncertainty:
-            # return np.random.triangular(left=graph_link['ttopt'], mode=graph_link['ttmean'], right=graph_link['ttpes'])
-            downside = graph_link['ttmean'] - graph_link['ttopt']
-            upside = graph_link['ttpes'] - graph_link['ttmean']
 
-            lb = graph_link['ttopt']
-            ub = graph_link['ttpes']
+            # lb = graph_link['ttopt']
+            # ub = graph_link['ttpes']
 
-            # mult = 10
-            # if downside >= 0 and upside >= 0:
-            #     lb = graph_link['ttmean'] - (10*downside)
-            #     if lb < 0:
-            #         mult = math.floor((graph_link['ttmean']-1)/downside)
-            #         lb = graph_link['ttmean'] - (mult*downside)
+            # tt_draw = self.rs.uniform(lb, ub)
 
-            #     ub = graph_link['ttmean'] + (mult*upside)
+            delta = graph_link["slnshift"]
+            mu = graph_link["slnmean"]
+            sigma = graph_link["slnsd"]
 
-            # print('Link: {} || Lower Bound TT: {} || Upper Bound TT: {}'.format(link_index, lb, ub))
+            tt_draw = delta + np.exp(self.rs.normal(mu, sigma))
 
-            return self.rs.uniform(lb, ub)
+            return tt_draw
         else:
             return graph_link['ttmean']
 
@@ -68,7 +62,7 @@ class RoutingEngine(object):
     def get_routing(self, olng, olat, dlng, dlat, pre_drawn_tt=None, use_uncertainty=False):
         onodename = str((olng, olat))
         dnodename = str((dlng, dlat))
-        path = self.G.get_shortest_paths(onodename, to=dnodename, weights='ttmean', output='epath')[0]
+        path = self.G.get_shortest_paths(onodename, to=dnodename, weights='ttmedian', output='epath')[0]
 
         # Convert path from list of edge ids in Graph to json-like route
         route = dict()

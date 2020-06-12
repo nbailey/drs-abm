@@ -84,7 +84,7 @@ PRICE_KM = 0.527
 PRICE_DISC = 0.75
 
 # Whether the link travel times use a triangular distribution (tt_opt, tt_avg, tt_pes) or not
-LINK_UNCERTAINTY = False
+LINK_UNCERTAINTY = True
 
 # Whether the vehicles know the link travel time ahead of insertion or afterwards
 PRE_DRAW_TTS = False
@@ -108,7 +108,7 @@ T_TOTAL = (T_WARM_UP + T_STUDY + T_COOL_DOWN)
 # methods for vehicle-request assignment and rebalancing
 # ins = insertion heuristics, alonsomora = RTV-graph optimal assignment
 # sar = simple anticipatory rebalancing, orp = optimal rebalancing problem, dqn = deep Q network
-MET_ASSIGN = "ins"
+MET_ASSIGN = "alonsomora"
 MET_REOPT = "no"
 MET_REBL = "no"
 

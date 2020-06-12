@@ -496,7 +496,7 @@ def computeRoutingCost(orderedLocs, G, T=0, capacity=1e6, startPax = 0, infStop=
         # # using the links' expected travel times, and check whether
         # # the total elapsed time at the end of this segment meets
         # # the time constraints at the destination
-        # path_ett = G.shortest_paths(onodename, dnodename, weights="ttmean")
+        # path_ett = G.shortest_paths(onodename, dnodename, weights="ttmedian")
         # assert len(path_ett) == 1
         # assert len(path_ett[0]) == 1
         # assert path_ett[0][0] >= 0
@@ -517,7 +517,7 @@ def computeRoutingCost(orderedLocs, G, T=0, capacity=1e6, startPax = 0, infStop=
         # the diagonal (src 1 -> tgt 1, src 2 -> tgt 2, etc.). This is still
         # faster than calling shortest_paths() several times with only 1 src and
         # 1 tgt each time.
-        pathLengths = G.shortest_paths(src, tgt, weights="ttmean")
+        pathLengths = G.shortest_paths(src, tgt, weights="ttmedian")
         segLengths = [pathLengths[i][i] for i in range(len(src))]
 
         # Compute the arrival time at each destination using the cumulative sum
