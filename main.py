@@ -15,7 +15,6 @@ from local import graph_loc
 
 
 if __name__ == "__main__":
-	logging.basicConfig(filename='C:/Users/n3tur/Documents/GitHub/drs-abm/wtf-log',level=logging.DEBUG)
 	# try:
 	parser = argparse.ArgumentParser(
 		description="Agent-based model for Automated Mobility-on-Demand service simulation")
@@ -96,6 +95,3 @@ if __name__ == "__main__":
 			df_OD_LOS = df.copy(deep=True)
 
 		del df_OD_LOS
-	# except Exception as e:
-	#     logging.info(e)
-	#     print("!")

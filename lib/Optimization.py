@@ -47,14 +47,14 @@ class VehReqMatchingAssignment(AssignmentMethod):
         rvGraph = self.generatePairwiseGraph(vehs, reqs, G, T)
         rvTime = time.time() - t
         print("  R-V Graph successfully generated  in {:.2f} seconds! |V|={}, |E|={}".format(rvTime, len(rvGraph.vs), len(rvGraph.es)))
-        rvGraph.write("output/graphs/rv-assignment-{}.gml".format(T), "gml")
+        # rvGraph.write("output/graphs/rv-assignment-{}.gml".format(T), "gml")
 
         print("  Generating RTV graph for T={}".format(T))
         t = time.time()
         rtvGraph = self.generateRTVGraph(rvGraph, G, T)
         rtvTime = time.time() - t
         print("  RTV Graph successfully generated in {:.2f} seconds! |V|={}, |E|={}".format(rtvTime, len(rtvGraph.vs), len(rtvGraph.es)))
-        rtvGraph.write("output/graphs/rtv-assignment-{}.gml".format(T), "gml")
+        # rtvGraph.write("output/graphs/rtv-assignment-{}.gml".format(T), "gml")
 
         if len(rtvGraph.vs) > 0 and len(rtvGraph.es) > 0:
             t = time.time()
