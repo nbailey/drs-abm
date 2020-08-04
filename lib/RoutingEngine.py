@@ -27,7 +27,7 @@ class RoutingEngine(object):
         seed: A random seed used to draw link travel times from a random distribution
         rs: A numpy random state seeded with a random value recorded in output, or a passed in seed
     """
-    def __init__(self, graph_loc, cst_speed, seed=None):
+    def __init__(self, graph_loc, cst_speed, seed=None, initial_hour=None, speed_table=None):
         self.G = ig.Graph.Read_GML(graph_loc)
         self.cst_speed = cst_speed
         if seed is None:
@@ -35,24 +35,41 @@ class RoutingEngine(object):
             print('ROUTING ENGINE SEED: {}'.format(seed), file=open('output/seeds.txt', 'a+'))
         self.rs = np.random.RandomState(seed)
 
+        if initial_hour is not None:
+            self.hour = initial_hour
+            self.speeds = speed_table[speed_table["hour"]==self.hour].sample()
+        else:
+            self.hour = None
+            self.speeds = None
+
+
+    def update_hour(new_hour):
+        self.hour = new_hour
+        self.speeds = SPEED_TABLE[SPEED_TABLE["hour"]==self.hour].sample()
+
 
     def draw_link_travel_time(self, link_index, use_uncertainty=True):
         graph_link = self.G.es[link_index]
 
         if use_uncertainty:
 
-            # lb = graph_link['ttopt']
-            # ub = graph_link['ttpes']
+            if self.speeds is not None:
+                mu = float(self.speeds["edge_{}_speed_mean".format(int(link_index))])
+                sigma = float(self.speeds["edge_{}_speed_stddev".format(int(link_index))])
 
-            # tt_draw = self.rs.uniform(lb, ub)
+                # Set lower limit on road speed to 5mph to avoid outlier results and errors
+                speed_draw = np.max([self.rs.normal(mu, sigma), 5])
 
-            delta = graph_link["slnshift"]
-            mu = graph_link["slnmean"]
-            sigma = graph_link["slnsd"]
+                return graph_link["length"] / (speed_draw * MPH_2_MPS)
 
-            tt_draw = delta + np.exp(self.rs.normal(mu, sigma))
+            else:
+                delta = graph_link["slnshift"]
+                mu = graph_link["slnmean"]
+                sigma = graph_link["slnsd"]
 
-            return tt_draw
+                tt_draw = delta + np.exp(self.rs.normal(mu, sigma))
+
+                return tt_draw
         else:
             return graph_link['ttmean']
 

@@ -11,7 +11,7 @@ from lib.Agents import *
 from lib.Demand import *
 from lib.Constants import *
 from lib.ModeChoice import *
-from local import graph_loc
+from local import *
 
 
 if __name__ == "__main__":

@@ -4,8 +4,8 @@ utility functions are found here
 
 import csv
 import copy
-import numpy as np
 import datetime
+import numpy as np
 
 from lib.RoutingEngine import *
 from lib.Agents import *

@@ -63,7 +63,7 @@ min_cost_avpt = 5.67 # dollars
 FARE = [price_base, price_unit_time, price_unit_distance, sharing_discount, transit_connect_discount, min_cost_avpt]
 
 # fleet size and vehicle capacity
-FLEET_SIZE = [200]
+FLEET_SIZE = [300]
 VEH_CAPACITY = 4
 
 # Distance threshold for minimum service distance (setting to 0 means no distance threshold - trips can be of any length)
@@ -84,7 +84,7 @@ PRICE_KM = 0.527
 PRICE_DISC = 0.75
 
 # Whether the link travel times use a triangular distribution (tt_opt, tt_avg, tt_pes) or not
-LINK_UNCERTAINTY = True
+LINK_UNCERTAINTY = False
 
 # Whether the vehicles know the link travel time ahead of insertion or afterwards
 PRE_DRAW_TTS = False
@@ -100,8 +100,8 @@ INI_DETOUR = 1.25
 ITER_STEPS = 1
 
 # warm-up time, study time and cool-down time of the simulation (in seconds)
-T_WARM_UP = 60*30 # 60*30
-T_STUDY = 60*60 # 60*60
+T_WARM_UP = 60*15 # 60*30
+T_STUDY = 60*45 # 60*60
 T_COOL_DOWN = 60*30 # 60*30
 T_TOTAL = (T_WARM_UP + T_STUDY + T_COOL_DOWN)
 
@@ -129,12 +129,16 @@ IS_ANIMATION = False
 PRINT_PROGRESS = True
 
 # maximum detour factor and maximum wait time window
-MAX_DETOUR = 1.5
-MAX_WAIT = 60*10
+MAX_DETOUR = 1.25
+MAX_WAIT = 60*5
 
 # constant vehicle speed when road network is disabled (in meters/second)
 CST_SPEED = 9 # Based on empirical results from routing engine
 # CST_SPEED = 6
+
+# Conversion factors between miles per hour and meters per second
+MPH_2_MPS = 0.44704
+MPS_2_MPH = 2.23694
 
 # probability that a request is sent in advance (otherwise, on demand)
 PROB_ADV = 0.0
