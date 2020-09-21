@@ -108,7 +108,7 @@ class AlonsoMora(VehReqMatchingAssignment):
     def generatePairwiseGraph(self, vehs, reqs, G, T=0):
         rvGraph = ig.Graph()
         for req in reqs:
-            if not req.assigned:
+            if req.assigned is not None and not req.assigned:
                 # Create a vertex representing this request with
                 # all relevant information needed for matching
                 # so that the reqs don't have to keep getting referenced

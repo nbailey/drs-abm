@@ -85,8 +85,8 @@ def print_results(model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fl
     df_OD_LOS['summed_detour_factor'] = 0
 
     reqDF = pd.DataFrame(columns=['rid', 'OLat', 'OLng', 'DLat', 'DLng', 'T_req_pickup', 'T_pickup', 'T_dropoff',
-                                  'Is_OnDemand', 'Num_Pickups', 'Num_Dropoffs', 'PWT', 'RWT', 'AWT', 'WT_AbsDev',
-                                  'PVT', 'RVT', 'AVT', 'VT_AbsDev', 'T_Direct'])
+                                  'Is_OnDemand', 'Veh_ID', 'New_OE', 'Num_Pickups', 'Num_Dropoffs', 'PWT', 'RWT', 'AWT', 'WT_AbsDev',
+                                  'PVT', 'RVT', 'AVT', 'VT_AbsDev', 'T_Dir_Veh', 'T_Dir_Wait'])
     req_keys = list(reqDF.columns)
 
     od_request_list = list()
@@ -96,8 +96,9 @@ def print_results(model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fl
         simulated_reqs += 1
         if req.Tr >= T_WARM_UP and req.Cep <= T_WARM_UP+T_STUDY and not req.DR:
             req_data = [req.id, req.olat, req.olng, req.dlat, req.dlng, req.Cep,
-                        req.Tp, req.Td, req.OnD, req.NP, req.ND, req.fpwt, req.rewt, req.Tp-req.Cep,
-                        req.wtdev, req.fpvt, req.revt, req.Td-req.Tp, req.vtdev, req.Ts]
+                        req.Tp, req.Td, req.OnD, req.assigned_veh, req.new_occ, req.NP, req.ND,
+                        req.fpwt, req.rewt, req.Tp-req.Cep, req.wtdev, req.fpvt, req.revt,
+                        req.Td-req.Tp, req.vtdev, req.Ts, req.Rs]
             req_row = {req_keys[i]: req_data[i] for i in range(len(req_keys))}
             reqDF = reqDF.append(req_row, ignore_index=True)
 
@@ -194,6 +195,8 @@ def print_results(model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fl
     veh_rebl_time = 0.0
     veh_load_by_dist = 0.0
     veh_load_by_time = 0.0
+    veh_occupancy_events = 0.0
+    veh_trips_per_occupancy = 0.0
     cost = 0.0
 
     for veh in model.vehs:
@@ -206,6 +209,7 @@ def print_results(model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fl
         if not veh.Ds + veh.Dp + veh.Dr == 0:
             veh_load_by_dist += veh.Ld / (veh.Ds + veh.Dp + veh.Dr)
         veh_load_by_time += veh.Lt / T_STUDY
+        veh_occupancy_events += veh.oes
         cost += COST_BASE + COST_MIN * T_STUDY/60 + COST_KM/1000 * (veh.Ds + veh.Dp + veh.Dr)
     veh_service_dist /= model.V
     veh_service_time /= model.V
@@ -218,6 +222,9 @@ def print_results(model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fl
     veh_rebl_time_percent = 100.0 * veh_rebl_time / T_STUDY
     veh_load_by_dist /= model.V
     veh_load_by_time /= model.V
+
+    if not count_served == 0:
+        veh_trips_per_occupancy = count_served / veh_occupancy_events
 
     overall_logsum = (logsum_w_AVPT - logsum_wout_AVPT) / 0.144 * 10
 
@@ -264,7 +271,7 @@ def print_results(model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fl
          service_rate, count_served, count_reqs, service_rate_ond, count_served_ond, count_reqs_ond, service_rate_adv, count_served_adv, count_reqs_adv,
          wait_time, wait_time_adj, wait_time_ond, wait_time_adv, in_veh_time, detour_factor, veh_service_dist, veh_service_time, veh_service_time_percent,
          veh_pickup_dist, veh_pickup_time, veh_pickup_time_percent,
-         veh_rebl_dist, veh_rebl_time, veh_rebl_time_percent, veh_load_by_dist, veh_load_by_time,
+         veh_rebl_dist, veh_rebl_time, veh_rebl_time_percent, veh_load_by_dist, veh_load_by_time, veh_occupancy_events, veh_trips_per_occupancy,
          cost, benefit, logsum_w_AVPT, logsum_wout_AVPT, overall_logsum,
          ridershipchange_car,ridershipchange_walk,ridershipchange_bike,ridershipchange_taxi,ridershipchange_bus,ridershipchange_rail,ridershipchange_intermodal,
          simulated_reqs, None]

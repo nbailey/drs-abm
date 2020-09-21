@@ -96,6 +96,8 @@ class Veh(object):
         Tr: accumulated rebalancing time traveled
         Lt: accumulated load, weighed by service time
         Ld: accumulated load, weighed by service distance
+        occ: Boolean variable whether the vehicle is occupied
+        oes: number of occupancy events (OEs) defined as time in between two periods when vehicle is empty
     """
     def __init__(self, id, rs, K=4, S=6, T=0.0, ini_loc=None):
         self.id = id
@@ -126,6 +128,7 @@ class Veh(object):
         self.Tr = 0.0
         self.Lt = 0.0
         self.Ld = 0.0
+        self.oes = 0
 
     def get_location(self):
         return (self.lng, self.lat)
@@ -394,8 +397,19 @@ class Veh(object):
                     self.Dr += leg.d if leg.rid == -1 else 0
                     self.Lt += leg.t * self.n if leg.rid != -1 else 0
                     self.Ld += leg.d * self.n if leg.rid != -1 else 0
+
+                # On pickup, add 1 occupancy event to the vehicle if either:
+                # * There were no passengers in the vehicle prior to pickup
+                # * This is the first pickup recorded within the study period (i.e. no previously recorded occupancy events)
+                # NOTE: Request statistics are recorded for requests that request pickup within study period, a slightly
+                #       different criteria than above for vehicle statistics.
+                if reqs[leg.rid].Cep >= T_WARM_UP and reqs[leg.rid].Tr <= T_WARM_UP+T_STUDY and (len(rids_in_veh) == 0 or self.oes == 0):
+                    self.oes += 1
+                    reqs[leg.rid].new_occ = True
+
                 self.jump_to_location(leg.tlng, leg.tlat)
                 rids_in_veh, rids_not_in_veh = self.update_passengers_on_leg(leg, reqs, rids_in_veh, rids_not_in_veh)
+
                 done.append( (leg.rid, leg.pod, self.T) )
                 self.pop_leg()
             else:
@@ -696,8 +710,10 @@ class Req(object):
         olat: origin lngitude
         dlng: destination longtitude
         dlat: destination lngitude
-        Ds: shortest travel distance
-        Ts: shortest travel time
+        Ds: shortest travel distance from request's origin to destination
+        Ts: shortest travel time from request's origin to destination
+        Ps: shortest travel distance from assigned vehicle to request's origin
+        Rs: shortest travel time from assigned vehicle to request's origin
         OnD: true if on-demand, false if in-advance
         Cep: constraint - earliest pickup
         Clp: constraint - latest pickup
@@ -710,6 +726,8 @@ class Req(object):
         ND: number of other requests dropped off while this passenger is in vehicle
         m_id: The row of the demand matrix used to generate this request
         assigned: True if request has been assigned to a vehicle, False otherwise
+        assigned_veh: id of vehicle that serves this trip, if any
+        new_occ: 1 if this is request is a new occupancy event, 0 otherwise
         has_predictions: True if any predictions (pred_tt/wt) have been made, False otherwise
         pvt: Current prediction of in-vehicle travel time
         pwt: Current prediction of waiting time
@@ -734,6 +752,7 @@ class Req(object):
         self.dlng = dlng
         self.dlat = dlat
         self.Ds, self.Ts = router.get_distance_duration(olng, olat, dlng, dlat, euclidean=False)
+        self.Rs = -1.0
 
         self.OnD = OnD
         if self.OnD:
@@ -751,6 +770,8 @@ class Req(object):
         self.ND = 0
         self.m_id = m_id
         self.assigned = False
+        self.assigned_veh = -1
+        self.new_occ = False
         self.has_predictions = False
         self.pvt = 0.0
         self.pwt = 0.0
@@ -873,6 +894,7 @@ class Model(object):
             # pdb.set_trace()
         if self.N > 0:
             self.queue.append(self.reqs[-1])
+            # self.reqs[-1].assigned = False
         elif self.N == 0:
             req = self.generate_request(router)
             self.reqs.append(req)
@@ -903,7 +925,7 @@ class Model(object):
                         self.reqs[rid].rewt = self.reqs[rid].fpwt
                     # Reset the elapsed expected waiting time to 0 so that RWT won't update any more
                     self.eewt = 0.0
-
+ 
                 # If a dropoff leg was completed, ...
                 elif pod == -1:
                     # Update the request with dropoff time
@@ -925,6 +947,7 @@ class Model(object):
                     # is equal to its dropoff time (t)
                     if not LINK_UNCERTAINTY and veh.K == 1:
                         assert np.isclose(self.reqs[rid].Tp + self.reqs[rid].Ts, t)
+
 
                     # If the trip was not from a location to the same location, then its detour
                     # is equal to the actual time it took from its origin to its destination
@@ -973,6 +996,25 @@ class Model(object):
 
     # Alonso-Mora anytime optimal assignment
     def optimal_assignment(self, router, T):
+        for req in self.queue:
+            reject_for_distance = False
+            if req.Ts < TIME_THRESHOLD:
+                reject_for_distance = True
+
+            # if DISTANCE_THRESHOLD > 0:
+            #     req_dist = router.get_distance(req.olng, req.olat, req.dlng, req.dlat)
+            #     if req_dist < DISTANCE_THRESHOLD:
+            #         reject_for_distance = True
+
+            if reject_for_distance:
+                self.distance_rejs.append(req)
+                req.DR = True
+                req.assigned = None
+                print("Request {} rejected because shortest path time {:.1f} < threshold of {}s".format(
+                    req.id, req.Ts, TIME_THRESHOLD))
+                # print("Request {} rejected because distance {:.1f} < distance threshold of {}".format(
+                #     req.id, req_dist, DISTANCE_THRESHOLD))
+
         veh_routes, rejs = self.optimizer.optimizeAssignment(
             self.vehs, self.reqs, self.G, T)
 
@@ -984,6 +1026,15 @@ class Model(object):
             for rid, _, _, _ in route:
                 if rid not in veh_reqs:
                     self.reqs[rid].assigned = True
+                    self.reqs[rid].assigned_veh = veh
+                    # Find the shortest path distance between the vehicle and the request's origin
+                    # Since vehicle is extremely unlikely to be at exact node, calculate distance
+                    # from the next downstream node and add the time it will take the vehicle to arrive there.
+                    veh_next_loc, veh_step_t = self.vehs[veh].get_next_node()
+                    self.reqs[rid].Ps, self.reqs[rid].Rs = router.get_distance_duration(
+                        veh_next_loc[0], veh_next_loc[1], self.reqs[rid].olng, self.reqs[rid].olat)
+                    self.reqs[rid].Rs += veh_step_t + T - self.reqs[rid].Cep
+
                     new_reqs.add(str(rid))
             text = "  Vehicle {} assigned to request".format(veh)
             if len(new_reqs) > 1:
@@ -1109,7 +1160,7 @@ class Model(object):
             # and are unknown to the vehicle when costs are evaluated
             dt = None
             if PRE_DRAW_TTS:
-                path = router.G.get_shortest_paths(str((lng, lat)), to=str((tlng, tlat)), weights='ttmean', output='epath')[0]
+                path = router.G.get_shortest_paths(str((lng, lat)), to=str((tlng, tlat)), weights=router.ttweight, output='epath')[0]
                 route_tt = 0
                 edge_tt_dict = dict()
                 for edge_index in path:

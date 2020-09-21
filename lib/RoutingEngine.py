@@ -24,16 +24,18 @@ class RoutingEngine(object):
         graph_loc: the location of the GML file graph representation of the network
         G: the igraph Graph object loaded from graph_loc
         cst_speed: A constant speed to use in some situations
+        ttweight: What value to use for shortest path calculation
         seed: A random seed used to draw link travel times from a random distribution
         rs: A numpy random state seeded with a random value recorded in output, or a passed in seed
     """
-    def __init__(self, graph_loc, cst_speed, seed=None, initial_hour=None, speed_table=None):
+    def __init__(self, graph_loc, cst_speed, ttweight='ttmedian', seed=None, initial_hour=None, speed_table=None):
         self.G = ig.Graph.Read_GML(graph_loc)
         self.cst_speed = cst_speed
         if seed is None:
             seed = np.random.randint(0,1000000)
             print('ROUTING ENGINE SEED: {}'.format(seed), file=open('output/seeds.txt', 'a+'))
         self.rs = np.random.RandomState(seed)
+        self.ttweight = ttweight
 
         if initial_hour is not None:
             self.hour = initial_hour
@@ -65,13 +67,13 @@ class RoutingEngine(object):
             else:
                 delta = graph_link["slnshift"]
                 mu = graph_link["slnmean"]
-                sigma = graph_link["slnsd"]
+                sigma = UNCERTAINTY_MULTIPLIER * graph_link["slnsd"]
 
                 tt_draw = delta + np.exp(self.rs.normal(mu, sigma))
 
                 return tt_draw
         else:
-            return graph_link['ttmean']
+            return graph_link[self.ttweight]
 
     # get the best route from origin to destination
     # Can pass in pre_drawn_tt, a tuple where the 0th element is the total route travel time if pre-drawn
@@ -79,7 +81,7 @@ class RoutingEngine(object):
     def get_routing(self, olng, olat, dlng, dlat, pre_drawn_tt=None, use_uncertainty=False):
         onodename = str((olng, olat))
         dnodename = str((dlng, dlat))
-        path = self.G.get_shortest_paths(onodename, to=dnodename, weights='ttmedian', output='epath')[0]
+        path = self.G.get_shortest_paths(onodename, to=dnodename, weights=self.ttweight, output='epath')[0]
 
         # Convert path from list of edge ids in Graph to json-like route
         route = dict()
@@ -191,7 +193,7 @@ class RoutingEngine(object):
         onodename = str((olng, olat))
         dnodename = str((dlng, dlat))
 
-        path = self.G.get_shortest_paths(onodename, to=dnodename, weights='ttmean', output='epath')[0]
+        path = self.G.get_shortest_paths(onodename, to=dnodename, weights=self.ttweight, output='epath')[0]
 
         total_distance = 0
         for edge_index in path:
@@ -204,11 +206,11 @@ class RoutingEngine(object):
     def get_duration(self, olng, olat, dlng, dlat):
         onodename = str((olng, olat))
         dnodename = str((dlng, dlat))
-        path = self.G.get_shortest_paths(onodename, to=dnodename, weights='ttmean', output='epath')[0]
+        path = self.G.get_shortest_paths(onodename, to=dnodename, weights=self.ttweight, output='epath')[0]
 
         duration = 0
         for edge_index in path:
-            duration += self.G.es[edge_index]['ttmean']
+            duration += self.G.es[edge_index][self.ttweight]
 
         return duration
 

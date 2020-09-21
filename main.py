@@ -44,7 +44,8 @@ if __name__ == "__main__":
 			   "wait_time_ond", "wait_time_adv", "in_veh_time", "detour_factor", "veh_service_dist",
 			   "veh_service_time", "veh_service_time_percent", "veh_pickup_dist", "veh_pickup_time",
 			   "veh_pickup_time_percent", "veh_rebl_dist", "veh_rebl_time", "veh_rebl_time_percent",
-			   "veh_load_by_dist", "veh_load_by_time", "cost", "benefit", "logsum_w_AVPT", "logsum_wout_AVPT",
+			   "veh_load_by_dist", "veh_load_by_time", "veh_occupancy_events", "veh_trips_per_occupancy",
+			   "cost", "benefit", "logsum_w_AVPT", "logsum_wout_AVPT",
 			   "overall_logsum", "ridershipchange_car", "ridershipchange_walk", "ridershipchange_bike",
 			   "ridershipchange_taxi", "ridershipchange_bus", "ridershipchange_rail", "ridershipchange_intermodal",
 			   None]
