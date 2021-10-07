@@ -89,7 +89,7 @@ if __name__ == "__main__":
 			model, step, runtime, logsum_w_AVPT, logsum_wout_AVPT, df_diffprob = run_simulation(
 				router, step, demand_matrix, fleet_size, veh_capacity, asc_avpt, fare, df_OD_LOS, AMOD_SEEDS[step])
 			# output the simulation results and save data
-			wait_time_adj, detour_factor, df = print_results(
+			wait_time_adj, detour_factor, df, req_data = print_results(
 				model, step, runtime, fare, logsum_w_AVPT, logsum_wout_AVPT,fleet_size, 1,
 				df_diffprob, results_filename, requests_filename=reqfname)
 

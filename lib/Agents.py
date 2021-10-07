@@ -2,12 +2,14 @@
 multiple classes for the AMoD system
 """
 
-import numpy as np
 import copy
-import math
-# import pdb # Debug
-from collections import deque
 import itertools
+import math
+import numpy as np
+import pandas as pd
+
+from collections import deque
+from scipy import stats
 
 from lib.Demand import *
 from lib.Constants import *
@@ -744,7 +746,7 @@ class Req(object):
                between the actual travel times and expected travel times of links traveled while in vehicle)
 
     """
-    def __init__(self, router, id, Tr, olng, olat, dlng, dlat, OnD=True, m_id=None):
+    def __init__(self, router, id, Tr, olng, olat, dlng, dlat, constraints=None, OnD=True, m_id=None):
         self.id = id
         self.Tr = Tr
         self.olng = olng
@@ -755,12 +757,21 @@ class Req(object):
         self.Rs = -1.0
 
         self.OnD = OnD
-        if self.OnD:
+        if constraints is not None:
+            self.Cep = constraints["Cep"]
+            self.Clp = constraints["Clp"]
+            self.Ced = constraints["Ced"]
+            self.Cld = constraints["Cld"]
+        elif self.OnD:
             self.Cep = Tr
             self.Clp = Tr + MAX_WAIT
+            self.Ced = self.Cep + self.Ts
+            self.Cld = self.Clp + MAX_DETOUR * self.Ts
         else:
             self.Cep = Tr + T_ADV_REQ
             self.Clp = Tr + T_ADV_REQ + MAX_WAIT
+            self.Ced = self.Cep + self.Ts
+            self.Cld = self.Clp + MAX_DETOUR * self.Ts
         self.Tp = -1.0
         self.Td = -1.0
         self.D = 0.0
@@ -796,7 +807,7 @@ class Req(object):
         return router.get_routing(self.olng, self.olat, self.dlng, self.dlat)
 
     def get_dropoff_time_window(self):
-        return [self.Cep + self.Ts, self.Clp + MAX_DETOUR * self.Ts]
+        return [self.Ced, self.Cld]
 
     # visualize
     def draw(self):
@@ -813,104 +824,144 @@ class Req(object):
         return str
 
 
-class Model(object):
+class Fleet(object):
     """
-    Model is the class for the AMoD system
+    Fleet is the class for one DRS service
+    Represents the exclusive OR shared service of one operator in the system
     Attributes:
-        rs1: a seeded random generator for requests
-        rs2: a seeded random generator for vehicle locations
-        T: system time at current state
-        M: demand matrix
-        D: demand volume (trips/hour)
+        rs: a seeded random number generator for vehicle locations
         V: number of vehicles
         K: capacity of vehicles
-        vehs: the list of vehicles
         N: number of requests
-        G: graph of road network (if graph is enabled)
-        reqs: the list of requests
+        vehs: the list of vehicles
+        reqs: the list of requets
         rejs: the list of rejected requests
-        distance_rejs: the list of requests rejected because the distance from O to D
-            was below the distance threshold (not included in rejs)
         queue: requests in the queue
         assign: assignment method
         rebl: rebalancing method
     """
-    def __init__(self, M, D, V=2, K=4, assign="ins", rebl="no", seeds=None, G=None):
-        if seeds is None:
-            seed1 = np.random.randint(0,1000000)
-            seed2 = np.random.randint(0,1000000)
-            print(' - Seed 1 : {}\n - Seed 2 : {}'.format(seed1, seed2), file=open('output/seeds.txt', 'a'))
-            seeds = (seed1, seed2)
-        else:
-            assert len(seeds) == 2
-        # two random generators, the seed of which could be modified for debug use
-        self.rs1 = np.random.RandomState(seeds[0])
-        self.rs2 = np.random.RandomState(seeds[1])
-        self.T = 0.0
-        self.M = M
-        self.D = D
+
+    def __init__(self, router, fare, V=2, K=4, assign="alonsomora", window="fixedmean", rebl="no", seed=None):
+        if seed is None:
+            seed = np.random.randint(0,1000000)
+            print(' - Seed generated for fleet: {}'.format(seed), file=open('output/seeds.txt', 'a'))
+        self.rs = np.random.RandomState(seed)
         self.V = V
         self.K = K
-        self.G = G
-        self.vehs = []
+        self.vehs = list()
         for i in range(V):
-            rand_node = self.rs2.choice(self.G.vs)
-            self.vehs.append(Veh(i, None, K=K, ini_loc=(rand_node['lng'], rand_node['lat'])))
+            rand_loc = router.generateRandomLocation()
+            self.vehs.append(Veh(i, None, K=K, ini_loc=(rand_loc['lng'], rand_loc['lat'])))
         self.N = 0
-        self.reqs = []
-        self.rejs = []
-        self.distance_rejs = []
-        self.queue = deque([])
+        self.reqs = list()
+        self.rejs = list()
         self.assign = assign
-        self.rebl = rebl
-        self.optimizer = AlonsoMora(params=OPT_PARAMS)
+        self.queue = deque(list())
+        self.rebl=rebl
+        if assign == "alonsomora":
+            self.optimizer = AlonsoMora(params=OPT_PARAMS)
+        else:
+            self.optimizer = MinDelayFlowMatching(params=OPT_PARAMS)
+        self.tt_kernel = None
+        self.wt_kernel = None
+        self.assign_method = assign
+        self.window_method = window
+        self.rebl_method = rebl
+        self.price_base = fare[0]
+        self.price_unit_time = fare[1]
+        self.price_unit_distance = fare[2]
+        self.min_fare = fare[3]
 
-    # generate one request, following exponential arrival interval
-    def generate_request(self, router):
-        dt = 3600.0/self.D * self.rs1.exponential()
-        rand = self.rs1.rand()
-        for mid, demand_row in enumerate(self.M):
-            if demand_row[5] > rand:
-                # demand_row[1] is the origin latitude, so this says half of requests south
-                # of 51.35N are in-advance requests.
-                if IN_ADV_REQS:
-                    OnD = False if demand_row[1] < 51.35 and self.rs1.rand() < 0.5 else True
-                else:
-                    OnD = True
-                # if len(self.reqs) > 0 and self.reqs[-1].id == 28:
-                #     pdb.set_trace()
-                req = Req(router,
-                          id=0 if self.N == 0 else self.reqs[-1].id+1,
-                          Tr=dt if self.N == 0 else self.reqs[-1].Tr+dt,
-                          olng=demand_row[0], olat=demand_row[1],
-                          dlng=demand_row[2], dlat=demand_row[3],
-                          OnD=OnD, m_id=mid) # move to last column for ttid in demand
-                break
-        return req
+    def generate_offer(self, router, trip, num_closest_vehs=3, t_range=[0,7200], spacing=10):
+        # TODO: What to do when there is no kernel yet? I.e. no historical data to base on. Maybe can create a baseline kernel to use from some iterations. 
+        o = (trip.olng, trip.olat)
+        d = (trip.dlng, trip.dlat)
 
-    # generate requests up to time T, following Poisson process
-    def generate_requests_to_time(self, router, T):
-        # if T == 90:
-            # pdb.set_trace()
-        if self.N > 0:
-            self.queue.append(self.reqs[-1])
-            # self.reqs[-1].assigned = False
-        elif self.N == 0:
-            req = self.generate_request(router)
-            self.reqs.append(req)
-            self.N += 1
+        # TODO: Get n dynamically maybe?
+        closest_vehs, veh_dists = self.get_n_closest_vehs(num_closest_vehs, o[0], o[1], router)
+        veh_weights = [1/(dist+0.01)**2 for dist in veh_dists]
+        veh_weights = veh_weights/np.sum(veh_weights)
 
-        while self.reqs[-1].Tr <= T:
-            req = self.generate_request(router)
-            self.reqs.append(req)
-            if req.Tr <= T:
-                self.queue.append(self.reqs[-1])
-            self.N += 1
-        assert self.N == len(self.reqs)
+        # TODO
+        # Future idea: Create a weighted average ewt/ett/etc. with weights proportional to the inverse distance of the vehicle
+        veh_wt_pdfs = list()
+        veh_tt_pdfs = list()
+        # combined_wt_pdf = [0]*maxtime
+        # combined_tt_pdf = [0]*maxtime
+        # print("\t\tchecking {} closest vehicles....".format(num_closest_vehs))
+        for i, veh in enumerate(closest_vehs):
+            w = veh_weights[i]
 
-    # dispatch the AMoD system: move vehicles, generate requests, assign, reoptimize and rebalance
+            v_loc, delay = veh.get_next_node()
+            # print("\t\t{}th vehicle is at ({}, {})".format(i, v_loc[0], v_loc[1]))
+
+            direct_wt = router.get_duration(v_loc[0], v_loc[1], o[0], o[1]) + delay
+
+            wt_mean, _, wt_pdf = self.kernel_time_estimate(direct_wt, "w", t_range, spacing)
+            veh_wt_pdfs.append(wt_pdf)
+            # combined_wt_pdf = [combined_wt_pdf[i] + (w*wt_pdf[i]) for i in range(len(wt_pdf))]
+
+            direct_tt = router.get_duration(o[0], o[1], d[0], d[1]) + wt_mean
+            tt_pdf = self.kernel_time_density(direct_tt, "t", t_range, spacing)
+            veh_tt_pdfs.append(tt_pdf)
+            # combined_tt_pdf = [combined_tt_pdf[i] + (w*tt_pdf[i]) for i in range(len(tt_pdf))]
+
+        combined_wt_pdf = np.dot(veh_weights, veh_wt_pdfs)
+        combined_tt_pdf = np.dot(veh_weights, veh_tt_pdfs)
+
+        assert np.isclose(np.nansum(combined_wt_pdf), 1.0)
+        assert np.isclose(np.nansum(combined_tt_pdf), 1.0)
+
+        y = np.arange(t_range[0], t_range[1], spacing)
+        ewt = np.nansum(np.multiply(combined_wt_pdf, y))
+        ett = np.nansum(np.multiply(combined_tt_pdf, y))
+        # Var(X) = E[X^2] - E[X]^2
+        wtv = np.nansum(np.multiply(combined_wt_pdf, np.square(y))) - np.square(ewt)
+        ttv = np.nansum(np.multiply(combined_tt_pdf, np.square(y))) - np.square(ett)
+
+        cost = np.max([self.price_base + self.price_unit_time*ett/60 + \
+            self.price_unit_distance*(np.nansum(np.multiply(veh_dists, veh_weights)) + router.get_distance(o[0], o[1], d[0], d[1]))/1000,
+            self.min_fare])
+
+        wt_window = self.makeTimeWindow(ewt, wtv, wt_pdf, self.window_method, spacing)
+        tt_window = self.makeTimeWindow(ett, ttv, tt_pdf, self.window_method, spacing)
+
+        # Combine all the attributes and convert to seconds
+        attrs = {
+            "cost": cost,
+            "ewt": ewt/60,
+            "wtv": np.sqrt(wtv)/60,
+            "ett": ett/60,
+            "ttv": np.sqrt(ttv)/60,
+            "minwt": wt_window[0]/60,
+            "maxwt": wt_window[1]/60,
+            "mintt": tt_window[0]/60,
+            "maxtt": tt_window[1]/60,
+        }
+
+        # print("\t\t- Finished offer: ${:.2f}, WT {:.1f} mins, Total TT {:.1f} mins".format(attrs["cost"], attrs["ewt"], attrs["ett"]))
+
+        return attrs
+
+    def add_request(self, trip, offer, router):
+        Cep = trip.T + (offer["minwt"]*60)
+        Clp = trip.T + (offer["maxwt"]*60)
+        Ced = trip.T + (offer["mintt"]*60)
+        Cld = trip.T + (offer["maxtt"]*60)
+
+        constraints = {"Cep": Cep, "Clp": Clp, "Ced": Ced, "Cld": Cld}
+
+        req = Req(router,
+                  id=0 if self.N == 0 else self.reqs[-1].id + 1,
+                  Tr=trip.T, olng=trip.olng, olat=trip.olat,
+                  dlng=trip.dlng, dlat=trip.dlat,
+                  constraints=constraints)
+
+        self.reqs.append(req)
+        self.queue.append(req)
+        self.N += 1
+
     def dispatch_at_time(self, router, T):
-        self.T = T
         for veh in self.vehs:
             # Calculate all vehicle movements until time T. Outputs a list of all finished legs in the timestep.
             done = veh.move_to_time(T, self.reqs)
@@ -967,22 +1018,8 @@ class Model(object):
                 # to idle - make it build an empty route for that goal
                 veh.build_route(router, [])
 
-        self.generate_requests_to_time(router, T)
-
-        # Some testing for now of the Alonso-Mora optimization procedure
-        # if np.isclose(T % 600, 0):
-        #     print("Generating R-V graph for timestep {}".format(T))
-        #     rvGraph = self.optimizer.generatePairwiseGraph(self.vehs, self.reqs, self.G, T)
-        #     print("Graph successfully generated! |V|={}, |E|={}".format(len(rvGraph.vs), len(rvGraph.es)))
-        #     rvGraph.write("output/graphs/alonsomora-rv-graph-{}.gml".format(T), "gml")
-
-        #     print("Generating RTV graph for timestep {}".format(T))
-        #     rtvGraph = self.optimizer.generateRTVGraph(rvGraph, self.G, T)
-        #     print("Graph successfully generated! |V|={}, |E|={}".format(len(rtvGraph.vs), len(rtvGraph.es)))
-        #     rtvGraph.write("output/graphs/alonsomora-rtv-graph-{}.gml".format(T), "gml")
-
         # Could add the previously rejected requests back into the pool if their Clp hasn't passed
-        if PRINT_PROGRESS: print(self)
+        # if PRINT_PROGRESS: print(self)
         if np.isclose(T % INT_ASSIGN, 0):
             if self.assign == "ins":
                 self.insertion_heuristics(router, T)
@@ -993,6 +1030,339 @@ class Model(object):
                 self.rebalance_sar(router)
             elif self.rebl == "orp":
                 self.rebalance_orp(router, T)
+
+    def optimal_assignment(self, router, T):
+        # for req in self.queue:
+        for req in self.queue:
+            reject_for_distance = False
+            if req.Ts < TIME_THRESHOLD:
+                reject_for_distance = True
+
+            # if DISTANCE_THRESHOLD > 0:
+            #     req_dist = router.get_distance(req.olng, req.olat, req.dlng, req.dlat)
+            #     if req_dist < DISTANCE_THRESHOLD:
+            #         reject_for_distance = True
+
+            if reject_for_distance:
+                # self.distance_rejs.append(req)
+                req.DR = True
+                req.assigned = None
+                print("Request {} rejected because shortest path time {:.1f} < threshold of {}s".format(
+                    req.id, req.Ts, TIME_THRESHOLD))
+                # print("Request {} rejected because distance {:.1f} < distance threshold of {}".format(
+                #     req.id, req_dist, DISTANCE_THRESHOLD))
+
+        print("Fleet has {} requests to assign to vehicles".format(len(self.queue)))
+
+        veh_routes, rejs = self.optimizer.optimizeAssignment(
+            self.vehs, self.reqs, router.G, T)
+
+        for veh in veh_routes:
+            route = veh_routes[veh]
+            pax_reqs, wait_reqs = self.vehs[veh].get_passenger_requests()
+            veh_reqs = pax_reqs | wait_reqs
+            new_reqs = set()
+            for rid, _, _, _ in route:
+                if rid not in veh_reqs:
+                    self.reqs[rid].assigned = True
+                    self.reqs[rid].assigned_veh = veh
+                    # Find the shortest path distance between the vehicle and the request's origin
+                    # Since vehicle is extremely unlikely to be at exact node, calculate distance
+                    # from the next downstream node and add the time it will take the vehicle to arrive there.
+                    veh_next_loc, veh_step_t = self.vehs[veh].get_next_node()
+                    self.reqs[rid].Ps, self.reqs[rid].Rs = router.get_distance_duration(
+                        veh_next_loc[0], veh_next_loc[1], self.reqs[rid].olng, self.reqs[rid].olat)
+                    self.reqs[rid].Rs += veh_step_t + T - self.reqs[rid].Cep
+
+                    new_reqs.add(str(rid))
+            text = "  Vehicle {} assigned to request".format(veh)
+            if len(new_reqs) > 1:
+                text += "s"
+            text += " {}.".format(", ".join(new_reqs))
+            print(text)
+            self.vehs[veh].build_route(router, route, self.reqs, T)
+
+        for rid in rejs:
+            req = self.reqs[rid]
+            self.rejs.append(req)
+            req.assigned = True
+            print("  Request {} rejected.".format(rid))
+
+        l = len(self.queue)
+        # l = len(self.reqs)
+        for _ in range(l):
+            req = self.queue.popleft()
+            # if not req.assigned:
+            #     self.queue.append(req)
+
+    def generate_historical_kernels(self, req_data, weights):
+        all_req_data = dict()
+        all_req_data["ewt"] = pd.Series()
+        all_req_data["ett"] = pd.Series()
+        all_req_data["wt_act"] = pd.Series()
+        all_req_data["tt_act"] = pd.Series()
+        all_req_data["weight"] = pd.Series()
+
+        for i, data in enumerate(req_data):
+            print("\tAdding historical data from run {} (weight: {})".format(i, weights[i]))
+            filtered_data = data[data["T_pickup"] > 0]
+
+            all_req_data["ewt"] = all_req_data["ewt"].append(filtered_data["T_Dir_Wait"], ignore_index=True)
+            all_req_data["wt_act"] = all_req_data["wt_act"].append(filtered_data["T_pickup"] - filtered_data["T_req_pickup"], ignore_index=True)
+
+            all_req_data["ett"] = all_req_data["ett"].append(filtered_data["T_Dir_Wait"] + filtered_data["T_Dir_Veh"], ignore_index=True)
+            all_req_data["tt_act"] = all_req_data["tt_act"].append(filtered_data["T_dropoff"] - filtered_data["T_req_pickup"], ignore_index=True)
+
+            all_req_data["weight"] = all_req_data["weight"].append(pd.Series([weights[i],] * len(filtered_data)), ignore_index=True)
+
+        pd.DataFrame(all_req_data).to_csv("output/debug-kernel-data.csv")
+
+        self.wt_kernel = self.fit_kernel(all_req_data["ewt"], all_req_data["wt_act"], all_req_data["weight"])
+
+        self.tt_kernel = self.fit_kernel(all_req_data["ett"], all_req_data["tt_act"], all_req_data["weight"])
+
+    def fit_kernel(self, expected, actual, weights):
+        values = np.vstack([expected, actual])
+        kernel = stats.gaussian_kde(values, weights=weights)
+
+        return kernel
+
+    def kernel_time_estimate(self, expected, mode, t_range=[0, 7200], spacing=5):
+        kernel = None
+        if mode == "t":
+            kernel = self.tt_kernel
+        elif mode == "w":
+            kernel = self.wt_kernel
+        else:
+            raise ValueError("Mode for Fleet.kernel_time_estimate() must be either \"w\" (wait time) or \"t\" (total travel time).")
+
+        x = expected
+        y = np.arange(t_range[0],t_range[1],spacing)
+
+        X, Y = np.mgrid[expected:expected+0.5, t_range[0]:t_range[1]:spacing]
+
+        points = np.vstack([X.ravel(), Y.ravel()])
+
+        pdf = kernel.evaluate(points)
+
+        if np.isclose(np.nansum(pdf), 0.0):
+            # print("\t\t!")
+            return 1e6, 1e6, np.ones(y.shape)/np.sum(np.ones(y.shape))
+
+        cond_pdf = pdf / np.nansum(pdf) # PDF of y conditional on the value of x
+
+        try:
+            mean = np.nansum(np.multiply(cond_pdf, y))
+            # Var(X) = E[X^2] - E[X]^2
+            var = np.nansum(np.multiply(cond_pdf, np.square(y))) - np.square(mean)
+        except ValueError:
+            print("Expected: {}".format(x))
+            print("X: {}".format(X))
+            print("Y: {}".format(Y))
+            print("T_RANGE: {}".format(t_range))
+            print("Spacing: {}".format(spacing))
+            print("Points: {}".format(points))
+            print("Size of points: {}".format(points.shape))
+            print("PDF: {}".format(pdf))
+            print("Size of PDF: {}".format(pdf.shape))
+            print("Cond. PDF: {}".format(cond_pdf))
+            print("Size of cond.pdf: {}".format(cond_pdf.shape))
+            print("y: {}".format(y))
+
+            raise ValueError()
+
+        return mean, var, cond_pdf
+
+    def kernel_time_density(self, expected, mode, t_range=[0, 7200], spacing=5):
+        _, _, pdf = self.kernel_time_estimate(expected, mode, t_range, spacing)
+        return pdf
+
+    def makeTimeWindow(self, mean, var, pdf, method, spacing=5):
+        if method.find("fixedmean") >= 0:
+            # Extract the additional allowable delay from the method name i.e. "fixedmean-5" -> 5
+            max_delay = [int(s) for s in method.split("-") if s.isdigit()][0]
+
+            return (0, mean+max_delay)
+
+        elif method.find("percentile") >= 0:
+            # Extract the percentile from the method name, i.e. "percentile-90" -> 90
+            conf = [int(s) for s in method.split("-") if s.isdigit()][0]
+
+            # Create lower and upper bounds such that the given percent of the probability
+            # distribution lies between them, i.e. 90 -> 5% and 95%
+            p_low = 1.*(100 - conf) / 200
+            p_high = 1.*((100*p_low) + conf) / 100
+
+            # Convert pdf to cdf
+            cdf = np.cumsum(pdf)
+
+            # Find min index in cdf with value greater than each p cutoff value
+            t_min = min([(spacing*t, p) for t, p in enumerate(cdf) if p >= p_low])[0]
+            t_max = min([(spacing*t, p) for t, p in enumerate(cdf) if p >= p_high])[0]
+
+            return (t_min, t_max)
+
+        else:
+            return None
+
+    def get_n_closest_vehs(self, n, lng, lat, router):
+        veh_dists = list()
+        for veh in self.vehs:
+            if veh.n < veh.K:
+                veh_loc, _ = veh.get_next_node()
+                distance, _ = router.get_distance_duration(veh_loc[0], veh_loc[1], lng, lat, euclidean="True")
+                veh_dists.append(distance)
+            else:
+                veh_dists.append(1e10)
+
+        # Sort the indices of the veh_dists array in order from smallest crow's-flight distance to largest
+        ordered_vehs = np.argsort(veh_dists)
+        # Return the vehicles associated with the first n indices
+        closest_vehs = [self.vehs[k] for k in ordered_vehs[:n]]
+        closest_veh_dists = [veh_dists[k] for k in ordered_vehs[:n]]
+        return closest_vehs, closest_veh_dists
+
+
+class Model(object):
+    """
+    Model is the class for the AMoD system
+    Attributes:
+        rs: a seeded random generator for requests
+        T: system time at current state
+        M: demand matrix
+        D: demand volume (trips/hour)
+        V: number of vehicles
+        K: capacity of vehicles
+        vehs: the list of vehicles
+        N: number of requests
+        G: graph of road network (if graph is enabled)
+        reqs: the list of requests
+        rejs: the list of rejected requests
+        distance_rejs: the list of requests rejected because the distance from O to D
+            was below the distance threshold (not included in rejs)
+        queue: requests in the queue
+        assign: assignment method
+        rebl: rebalancing method
+    """
+    def __init__(self, demand, fleets, seed=None):
+        if seed is None:
+            seed = np.random.randint(0,1000000)
+            print(' - Seed generated for Model: {}'.format(seed), file=open('output/seeds.txt', 'a'))
+        self.rs = np.random.RandomState(seed)
+        self.T = 0.0
+        self.demand = demand
+        self.fleets = fleets
+        self.N = 0
+        self.trips = list()
+
+    # # generate one arrival into system, following exponential arrival interval
+    # def generate_arrival(self, router):
+    #     dt = 3600.0/self.D * self.rs1.exponential()
+    #     rand = self.rs.rand()
+    #     for mid, demand_row in enumerate(self.M):
+    #         if demand_row[5] > rand:
+    #             # demand_row[1] is the origin latitude, so this says half of requests south
+    #             # of 51.35N are in-advance requests.
+    #             if IN_ADV_REQS:
+    #                 OnD = False if demand_row[1] < 51.35 and self.rs1.rand() < 0.5 else True
+    #             else:
+    #                 OnD = True
+    #             # if len(self.reqs) > 0 and self.reqs[-1].id == 28:
+    #             #     pdb.set_trace()
+    #             req = Req(router,
+    #                       id=0 if self.N == 0 else self.reqs[-1].id+1,
+    #                       Tr=dt if self.N == 0 else self.reqs[-1].Tr+dt,
+    #                       olng=demand_row[0], olat=demand_row[1],
+    #                       dlng=demand_row[2], dlat=demand_row[3],
+    #                       OnD=OnD, m_id=mid) # move to last column for ttid in demand
+    #             break
+    #     return req
+
+    def generate_arrival(self):
+        dt = 3600.0/self.demand.getDemandVolume() * self.rs.exponential()
+
+        T = dt
+        if self.N > 0:
+            T = self.trips[-1].T + dt
+
+        arrival = self.demand.generateArrival(T)
+        return arrival
+
+    # # generate requests up to time T, following Poisson process
+    # def generate_arrivals_to_time(self, router, T):
+    #     # if T == 90:
+    #         # pdb.set_trace()
+    #     if self.N > 0:
+    #         self.queue.append(self.reqs[-1])
+    #         # self.reqs[-1].assigned = False
+    #     elif self.N == 0:
+    #         req = self.generate_request(router)
+    #         self.reqs.append(req)
+    #         self.N += 1
+
+    #     while self.reqs[-1].Tr <= T:
+    #         req = self.generate_request(router)
+    #         self.reqs.append(req)
+    #         if req.Tr <= T:
+    #             self.queue.append(self.reqs[-1])
+    #         self.N += 1
+    #     assert self.N == len(self.reqs)
+
+    def generate_arrivals_to_time(self, router, T):
+        new_trips = list()
+        if self.N == 0:
+            trip = self.generate_arrival()
+            self.trips.append(trip)
+            self.N += 1
+
+        while self.trips[-1].T <= T:
+            new_trips.append(self.trips[-1])
+
+            trip = self.generate_arrival()
+            self.trips.append(trip)
+
+            self.N += 1
+
+        assert self.N == len(self.trips)
+
+        return new_trips
+
+    # dispatch the AMoD system: move vehicles, generate requests, assign, reoptimize and rebalance
+    def dispatch_at_time(self, router, T):
+        new_trips = self.generate_arrivals_to_time(router, T)
+
+        print("In total, {} new trips arrived at timestep {}".format(len(new_trips), T))
+
+        for i, trip in enumerate(new_trips):
+            # print("{}th new trip request incoming, ({}, {}) -> ({}, {})".format(i, trip.olng, trip.olat, trip.dlng, trip.dlat))
+            offers = dict()
+            for fleet_name in self.fleets.keys():
+                fleet = self.fleets[fleet_name]
+
+                # print("\tGenerating offer from {} fleet".format(fleet_name))
+                offer = fleet.generate_offer(router, trip)
+                offers[fleet_name] = offer
+
+            modeProbs = trip.calc_mode_probs(offers, self.rs)
+            r = self.rs.rand()
+            p = 0
+            choice = None
+            for mode in modeProbs.keys():
+                p += modeProbs[mode]
+                if r < p:
+                    choice = mode
+                    break
+
+            print("\tTrip {} chooses to take the offer from {}: ${:.2f}, {:.1f}-{:.1f} min wait (expected: {:.1f}), {:.1f}-{:.1f} min total TT (expected: {:.1f})".format(
+                i, choice, offers[choice]["cost"], offers[choice]["minwt"], offers[choice]["maxwt"], offers[choice]["ewt"], offers[choice]["mintt"], offers[choice]["maxtt"], offers[choice]["ett"]))
+            for fleet_name in self.fleets.keys():
+                fleet = self.fleets[fleet_name]
+                if choice == fleet_name:
+                    fleet.add_request(trip, offers[fleet_name], router)
+
+        for fleet_name in self.fleets.keys():
+            fleet = self.fleets[fleet_name]
+            fleet.dispatch_at_time(router, T)
 
     # Alonso-Mora anytime optimal assignment
     def optimal_assignment(self, router, T):
