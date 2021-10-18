@@ -33,17 +33,27 @@ AMOD_SEEDS = [(750647, 605886),
 			  (588632, 193445),
 			  (246887, 574366),]
 
-UNCERTAINTY_SEEDS = [76430, 404532, 33056, 400529, 752796, 576792, 858374, 909047,
-	987227, 905252, 115304, 735597, 456409, 880912, 626737, 956382, 625166, 406721,
-	364452, 12627, 838455, 584522, 690561, 492257, 669087, 34207, 27258, 26107,
-	60378, 606888, 565062, 576961, 803493, 421167, 297518, 129191, 961417, 3196,
-	890554, 799327, 447215, 957737, 739430, 562751, 991267, 241537, 363019, 116581,]
+UNCERTAINTY_SEEDS = [76430,
+	[404532, 33056, 400529, 752796],
+	[576792, 858374, 909047, 987227],
+	[905252, 115304, 735597, 456409],
+	[880912, 626737, 956382, 625166],
+	[406721, 364452, 12627, 838455],
+	[584522, 690561, 492257, 669087,],
+	[34207, 27258, 26107, 60378],
+	[606888, 565062, 576961, 803493],
+	[421167, 297518, 129191, 961417],
+	[3196, 890554, 799327, 447215],
+	[957737, 739430, 562751, 991267],
+	[241537, 363019, 116581, 750647]]
 
 # Use the above list or generate and record random seeds
 USE_SEEDS = True
 
 # How many simulations at each fleet size to do
-SAMPLE_SIZE = 5
+SAMPLE_SIZE = 10
+
+EXP_NAME = "Test"
 
 # Base Fare from Leo
 # price_base = 0.831 # dollars/ per trip
@@ -53,14 +63,14 @@ SAMPLE_SIZE = 5
 # transit_connect_discount = 1.33 # dollars
 # min_cost_avpt = 1.73 # dollars
 
-#Fare
-price_base = 1.662 # dollars/ per trip
-price_unit_time = 0.222 # dollars/min
-price_unit_distance = 1.094 # dollars/km
-sharing_discount = 1 # 25% discount
-transit_connect_discount = 0 # dollars
-min_cost_avpt = 5.67 # dollars
-FARE = [price_base, price_unit_time, price_unit_distance, sharing_discount, transit_connect_discount, min_cost_avpt]
+# #Fare
+# price_base = 1.662 # dollars/ per trip
+# price_unit_time = 0.222 # dollars/min
+# price_unit_distance = 1.094 # dollars/km
+# sharing_discount = 1 # 25% discount
+# transit_connect_discount = 0 # dollars
+# min_cost_avpt = 5.67 # dollars
+# FARE = [price_base, price_unit_time, price_unit_distance, sharing_discount, transit_connect_discount, min_cost_avpt]
 
 # fleet size and vehicle capacity
 FLEET_SIZE = [300]
@@ -69,6 +79,7 @@ VEH_CAPACITY = 4
 # Distance threshold for minimum service distance (setting to 0 means no distance threshold - trips can be of any length)
 DISTANCE_THRESHOLD = 0 # meters
 # TODO: Add capability for trips to specific destinations (i.e. rail station) still be served regardless of distance threshold
+TIME_THRESHOLD = 0 # seconds
 
 # ASC and the nickname of the run
 ASC_AVPT = -3.0
@@ -84,7 +95,8 @@ PRICE_KM = 0.527
 PRICE_DISC = 0.75
 
 # Whether the link travel times use a triangular distribution (tt_opt, tt_avg, tt_pes) or not
-LINK_UNCERTAINTY = False
+LINK_UNCERTAINTY = True
+UNCERTAINTY_MULTIPLIER = 1.5
 
 # Whether the vehicles know the link travel time ahead of insertion or afterwards
 PRE_DRAW_TTS = False
@@ -100,9 +112,9 @@ INI_DETOUR = 1.25
 ITER_STEPS = 1
 
 # warm-up time, study time and cool-down time of the simulation (in seconds)
-T_WARM_UP = 60*15 # 60*30
-T_STUDY = 60*45 # 60*60
-T_COOL_DOWN = 60*30 # 60*30
+T_WARM_UP = 60*30 # 60*30
+T_STUDY = 60*60 # 60*60
+T_COOL_DOWN = 60*60 # 60*30
 T_TOTAL = (T_WARM_UP + T_STUDY + T_COOL_DOWN)
 
 # methods for vehicle-request assignment and rebalancing
@@ -129,8 +141,8 @@ IS_ANIMATION = False
 PRINT_PROGRESS = True
 
 # maximum detour factor and maximum wait time window
-MAX_DETOUR = 1.25
-MAX_WAIT = 60*5
+MAX_DETOUR = 1.5
+MAX_WAIT = 60*10
 
 # constant vehicle speed when road network is disabled (in meters/second)
 CST_SPEED = 9 # Based on empirical results from routing engine

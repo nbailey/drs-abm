@@ -28,8 +28,11 @@ class RoutingEngine(object):
         seed: A random seed used to draw link travel times from a random distribution
         rs: A numpy random state seeded with a random value recorded in output, or a passed in seed
     """
-    def __init__(self, graph_loc, cst_speed, ttweight='ttmedian', seed=None, initial_hour=None, speed_table=None):
-        self.G = ig.Graph.Read_GML(graph_loc)
+    def __init__(self, graph_loc=None, cst_speed=6, graph=None, ttweight='ttmedian', seed=None, initial_hour=None, speed_table=None):
+        if graph_loc is not None:
+            self.G = ig.Graph.Read_GML(graph_loc)
+        elif graph is not None:
+            self.G = graph
         self.cst_speed = cst_speed
         if seed is None:
             seed = np.random.randint(0,1000000)
@@ -221,3 +224,6 @@ class RoutingEngine(object):
             return gc_dist, gc_dist / self.cst_speed
         else:
             return self.get_distance(olng, olat, dlng, dlat), self.get_duration(olng, olat, dlng, dlat)
+
+    def generateRandomLocation(self):
+        return self.rs.choice(self.G.vs)
