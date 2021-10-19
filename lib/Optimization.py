@@ -870,14 +870,16 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
  
         # Lists of variable indices
         x_ek = gp.tuplelist([(edge.index, veh["nid"]) for edge in G_flow.es for veh in vehNodes if possible_flow[edge.index, veh["nid"]] and not edge["pruned"]]) # Also used for phi_ek
-        p_ik = gp.tuplelist([(node["nid"], veh["nid"]) for node in G_flow.vs for veh in vehNodes]) # Descending order
+        # p_ik = gp.tuplelist([(node["nid"], veh["nid"]) for node in G_flow.vs for veh in vehNodes]) # Descending order
+        p_i = gp.tuplelist([node["nid"] for node in G_flow.vs]) # Descending order
         n_ik = gp.tuplelist([(node["nid"], veh["nid"]) for node in nonSinkNodes for veh in vehNodes]) # Also used for Delta_ik
 
         edge_dist = gp.tupledict({edge.index: np.round(edge["length"], 3) for edge in G_flow.es if not edge["pruned"]})
 
         veh_edge_flow = m.addVars(x_ek, vtype=GRB.BINARY, name="x") # 1 if vehicle k traverses edge e, 0 otherwise
         delay_multiplier = m.addVars(x_ek, vtype=GRB.CONTINUOUS, name="phi", lb=0) # How many times edge e's travel time counts towards delay heuristics
-        req_veh_order = m.addVars(p_ik, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in vehicle k's route
+        req_order = m.addVars(p_i, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in its assigned vehicle's route
+        # req_veh_order = m.addVars(p_ik, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in vehicle k's route
         veh_occupancy = m.addVars(n_ik, vtype=GRB.CONTINUOUS, name="n", lb=0) # How many passengers are in vehicle k after it services location i
         req_veh_newass = m.addVars(n_ik, vtype=GRB.BINARY, name="Delta") # 1 if request i is newly assigned to vehicle k in this assignment, 0 otherwise
         theta = m.addVars(gp.tuplelist([i for i in range(N_scenarios)]), vtype=GRB.CONTINUOUS, name="theta", lb=0) # Delay in scenario s \in {1,...,N_scenarios}
@@ -885,7 +887,8 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         model_var_dict = {
             "x": veh_edge_flow,
             "phi": delay_multiplier,
-            "P": req_veh_order,
+            "P": req_order,
+            # "P": req_veh_order,
             "n": veh_occupancy,
             "Delta": req_veh_newass,
             "theta": theta,
@@ -903,19 +906,30 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         m.addConstrs((sum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) - sum([veh_edge_flow[e, k] for e in out_edges[i+N_R] if possible_flow[e, k]]) == 0 for i in V_O for k in K),
             "pickup_dropoff_flow")
 
+        # # Add order constraints (recall that order variables are descending along route):
+        # # 1) The order of a downstream node in a vehicle's route must be 1 less than the order of the upstream node if the vehicle flows along the edge
+        # m.addConstrs((2*N_R*(veh_edge_flow[e, k] - 1) + req_veh_order[getTargetNodeId(G_flow, e), k] - req_veh_order[i, k] <= -1 for e, i, j in EIJ for k in K if possible_flow[e, k]),
+        #     "req_veh_flow_order_ub")
+        # m.addConstrs((2*N_R*(1 - veh_edge_flow[e, k]) + req_veh_order[getTargetNodeId(G_flow, e), k] - req_veh_order[i, k] >= -1 for e, i, j in EIJ for k in K if possible_flow[e, k]),
+        #     "req_veh_flow_order_lb")
+        # # 2) The order variable for a dropoff location in vehicle's route must be less than the order of the pickup location if the vehicle services that pickup location
+        # m.addConstrs((req_veh_order[i, k] - req_veh_order[i+N_R,k] >= gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) for i in V_O for k in K),
+        #     "dropoff_after_pickup")
+        # # 3) The order of the sink node is always 0 for each vehicle
+        # m.addConstrs((req_veh_order[sinkId, k] == 0 for k in K), "veh_end_loc_order")
+        # # 4) If a vehicle does not flow into a location, then that location has order 0 in the vehicle's route
+        # m.addConstrs((req_veh_order[i, k] <= 2*N_R*gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) for i in V for k in K), "no_order_without_node_visit")
+
         # Add order constraints (recall that order variables are descending along route):
         # 1) The order of a downstream node in a vehicle's route must be 1 less than the order of the upstream node if the vehicle flows along the edge
-        m.addConstrs((2*N_R*(veh_edge_flow[e, k] - 1) + req_veh_order[getTargetNodeId(G_flow, e), k] - req_veh_order[i, k] <= -1 for e, i, j in EIJ for k in K if possible_flow[e, k]),
-            "req_veh_flow_order_ub")
-        m.addConstrs((2*N_R*(1 - veh_edge_flow[e, k]) + req_veh_order[getTargetNodeId(G_flow, e), k] - req_veh_order[i, k] >= -1 for e, i, j in EIJ for k in K if possible_flow[e, k]),
-            "req_veh_flow_order_lb")
-        # 2) The order variable for a dropoff location in vehicle's route must be less than the order of the pickup location if the vehicle services that pickup location
-        m.addConstrs((req_veh_order[i, k] - req_veh_order[i+N_R,k] >= gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) for i in V_O for k in K),
-            "dropoff_after_pickup")
-        # 3) The order of the sink node is always 0 for each vehicle
-        m.addConstrs((req_veh_order[sinkId, k] == 0 for k in K), "veh_end_loc_order")
-        # 4) If a vehicle does not flow into a location, then that location has order 0 in the vehicle's route
-        m.addConstrs((req_veh_order[i, k] <= 2*N_R*gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) for i in V for k in K), "no_order_without_node_visit")
+        m.addConstrs((2*N_R*(veh_edge_flow.sum(e, "*") - 1) + req_order[getTargetNodeId(G_flow, e)] - req_order[i] <= -1 for e, i, j in EIJ),
+            "req_flow_order_ub")
+        m.addConstrs((2*N_R*(1 - veh_edge_flow.sum(e, "*")) + req_order[getTargetNodeId(G_flow, e)] - req_order[i] >= -1 for e, i, j in EIJ),
+            "req_flow_order_lb")
+        # 2) The order variable for a dropoff location in vehicle's route must be less than the order of the pickup location (other constraints ensure it is same vehicle)
+        m.addConstrs((req_order[i] - req_order[i+N_R] >= 1 for i in V_O), "dropoff after pickup")
+        # 3) The order of the sink node is always 0 
+        m.addConstr(req_order[sinkId] == 0, "end_loc_order")
 
         # Add capacity constraints:
         # 1) The occupancy of a vehicle at a downstream node is equal to the occupancy at the upstream node plus the passenger change in occupancy at the downstream node if the vehicle flows along that edge
@@ -934,7 +948,9 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
             "added_veh_assignments")
 
         # The delay multiplier for an edge/vehicle pair is equal to the order of the downstream location in the vehicle's route as long as the vehicle traverses edge e, 0 otherwise
-        m.addConstrs((delay_multiplier[e, k] >= req_veh_order[j, k] - 2*N_R*(1-veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
+        # m.addConstrs((delay_multiplier[e, k] >= req_veh_order[j, k] - 2*N_R*(1-veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
+        #     "delay_multiplier_from_flow_and_order")
+        m.addConstrs((delay_multiplier[e, k] >= req_order[j] - 2*N_R*(1 - veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
             "delay_multiplier_from_flow_and_order")
         # Create a heuristic lower bound for the delay by taking the delay multipliers times the edges' travel times for all traversed edges and subtracting the time constraints for each node
         m.addConstrs((theta[s] >= gp.quicksum([delay_multiplier.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es]) - latest_dropoffs.sum() for s in range(N_scenarios)),
@@ -969,12 +985,12 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
                     veh_edge_flow[e, k].start = 0
                     delay_multiplier[e, k].start = 0
 
-            for i, k in req_veh_order.keys():
-                if (i, k) in initOrder.keys():
-                    req_veh_order[i, k].start = initOrder[i, k]
-                    # m.addConstr(req_veh_order[order] == initOrder[order], "fix_initial_order_soln[{}, {}]".format(order[0], order[1]))
-                else:
-                    req_veh_order[i, k].start = 0
+            # for i, k in req_veh_order.keys():
+            #     if (i, k) in initOrder.keys():
+            #         req_veh_order[i, k].start = initOrder[i, k]
+            #         # m.addConstr(req_veh_order[order] == initOrder[order], "fix_initial_order_soln[{}, {}]".format(order[0], order[1]))
+            #     else:
+            #         req_veh_order[i, k].start = 0
 
             for s in range(N_scenarios):
                 theta[s].start = np.sum([np.rint(np.asscalar(scenario_edge_times[s][e])) for e, _ in initFlows])
