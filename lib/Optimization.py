@@ -883,6 +883,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # veh_occupancy = m.addVars(n_ik, vtype=GRB.CONTINUOUS, name="n", lb=0) # How many passengers are in vehicle k after it services location i
         req_veh_newass = m.addVars(n_ik, vtype=GRB.BINARY, name="Delta") # 1 if request i is newly assigned to vehicle k in this assignment, 0 otherwise
         theta = m.addVars(gp.tuplelist([i for i in range(N_scenarios)]), vtype=GRB.CONTINUOUS, name="theta", lb=0) # Delay in scenario s \in {1,...,N_scenarios}
+        veh_delay = m.addVars(gp.tuplelist([(veh["nid"], s) for veh in vehNodes for s in range(N_scenarios)]), vtype=GRB.CONTINUOUS, name="z", lb=0)
 
         model_var_dict = {
             "x": veh_edge_flow,
@@ -892,6 +893,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
             # "n": veh_occupancy,
             "Delta": req_veh_newass,
             "theta": theta,
+            "z": veh_delay,
         }
 
         # Add flow constraints:
@@ -959,9 +961,15 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # m.addConstrs((theta[s] >= gp.quicksum([delay_multiplier.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es]) - latest_dropoffs.sum() for s in range(N_scenarios)),
         #     "delay_lb_from_flow")
 
-        m.addConstrs((theta[s] >= gp.quicksum([veh_edge_flow.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es if not e["pruned"]]) - \
-                      gp.quicksum([veh_edge_flow.sum(e, "*")*latest_dropoffs[i] for e, i, j in EIJ if i in V_D and j == sinkId]) for s in range(N_scenarios)),
-                     "delay_heuristic_lb")
+        # m.addConstrs((theta[s] >= gp.quicksum([veh_edge_flow.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es if not e["pruned"]]) - \
+        #               gp.quicksum([veh_edge_flow.sum(e, "*")*latest_dropoffs[i] for e, i, j in EIJ if i in V_D and j == sinkId]) for s in range(N_scenarios)),
+        #              "delay_heuristic_lb")
+
+        m.addConstrs((veh_delay[k, s] >= gp.quicksum([veh_edge_flow[e, k]*scenario_edge_times[s][e] for e, _, _ in EIJ if possible_flow[e, k]]) - \
+                      gp.quicksum([veh_edge_flow[e, k]*latest_dropoffs[i] for e, i, j in EIJ if possible_flow[e, k] and i in V and j == sinkId]) for k in K for s in range(N_scenarios)),
+                     "scenario_veh_delay_heuristic")
+        m.addConstrs((theta[s] >= veh_delay.sum("*", s) for s in range(N_scenarios)), "delay_heuristic_lb")
+
 
         # Optional heuristic to constrain routes to 2 request locations long at most to prevent searching inefficient routings
         m.addConstrs((req_veh_newass.sum("*", k) <= 2 for k in K),
@@ -1400,7 +1408,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         upper_level.setParam(GRB.Param.LazyConstraints, 1)
         upper_level.setParam(GRB.Param.IntegralityFocus, 1)
         upper_level.setParam(GRB.Param.MIPFocus, 2)
-        upper_level.setParam(GRB.Param.MIPGap, 0.95)
+        # upper_level.setParam(GRB.Param.MIPGap, 0.95)
         # upper_level.setParam(GRB.Param.Cuts, 2)
         # upper_level.setParam(GRB.Param.Heuristics, 0.01)
         upper_level.setParam(GRB.Param.Presolve, 2)
