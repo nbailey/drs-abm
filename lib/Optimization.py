@@ -871,25 +871,25 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # Lists of variable indices
         x_ek = gp.tuplelist([(edge.index, veh["nid"]) for edge in G_flow.es for veh in vehNodes if possible_flow[edge.index, veh["nid"]] and not edge["pruned"]]) # Also used for phi_ek
         # p_ik = gp.tuplelist([(node["nid"], veh["nid"]) for node in G_flow.vs for veh in vehNodes]) # Descending order
-        p_i = gp.tuplelist([node["nid"] for node in G_flow.vs]) # Descending order
+        # p_i = gp.tuplelist([node["nid"] for node in G_flow.vs]) # Descending order
         n_ik = gp.tuplelist([(node["nid"], veh["nid"]) for node in nonSinkNodes for veh in vehNodes]) # Also used for Delta_ik
 
         edge_dist = gp.tupledict({edge.index: np.round(edge["length"], 3) for edge in G_flow.es if not edge["pruned"]})
 
         veh_edge_flow = m.addVars(x_ek, vtype=GRB.BINARY, name="x") # 1 if vehicle k traverses edge e, 0 otherwise
-        delay_multiplier = m.addVars(x_ek, vtype=GRB.CONTINUOUS, name="phi", lb=0) # How many times edge e's travel time counts towards delay heuristics
-        req_order = m.addVars(p_i, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in its assigned vehicle's route
+        # delay_multiplier = m.addVars(x_ek, vtype=GRB.CONTINUOUS, name="phi", lb=0) # How many times edge e's travel time counts towards delay heuristics
+        # req_order = m.addVars(p_i, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in its assigned vehicle's route
         # req_veh_order = m.addVars(p_ik, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in vehicle k's route
-        veh_occupancy = m.addVars(n_ik, vtype=GRB.CONTINUOUS, name="n", lb=0) # How many passengers are in vehicle k after it services location i
+        # veh_occupancy = m.addVars(n_ik, vtype=GRB.CONTINUOUS, name="n", lb=0) # How many passengers are in vehicle k after it services location i
         req_veh_newass = m.addVars(n_ik, vtype=GRB.BINARY, name="Delta") # 1 if request i is newly assigned to vehicle k in this assignment, 0 otherwise
         theta = m.addVars(gp.tuplelist([i for i in range(N_scenarios)]), vtype=GRB.CONTINUOUS, name="theta", lb=0) # Delay in scenario s \in {1,...,N_scenarios}
 
         model_var_dict = {
             "x": veh_edge_flow,
-            "phi": delay_multiplier,
-            "P": req_order,
+            # "phi": delay_multiplier,
+            # "P": req_order,
             # "P": req_veh_order,
-            "n": veh_occupancy,
+            # "n": veh_occupancy,
             "Delta": req_veh_newass,
             "theta": theta,
         }
@@ -920,25 +920,25 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # # 4) If a vehicle does not flow into a location, then that location has order 0 in the vehicle's route
         # m.addConstrs((req_veh_order[i, k] <= 2*N_R*gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) for i in V for k in K), "no_order_without_node_visit")
 
-        # Add order constraints (recall that order variables are descending along route):
-        # 1) The order of a downstream node in a vehicle's route must be 1 less than the order of the upstream node if the vehicle flows along the edge
-        m.addConstrs((2*N_R*(veh_edge_flow.sum(e, "*") - 1) + req_order[getTargetNodeId(G_flow, e)] - req_order[i] <= -1 for e, i, j in EIJ),
-            "req_flow_order_ub")
-        m.addConstrs((2*N_R*(1 - veh_edge_flow.sum(e, "*")) + req_order[getTargetNodeId(G_flow, e)] - req_order[i] >= -1 for e, i, j in EIJ),
-            "req_flow_order_lb")
-        # 2) The order variable for a dropoff location in vehicle's route must be less than the order of the pickup location (other constraints ensure it is same vehicle)
-        m.addConstrs((req_order[i] - req_order[i+N_R] >= 1 for i in V_O), "dropoff after pickup")
-        # 3) The order of the sink node is always 0 
-        m.addConstr(req_order[sinkId] == 0, "end_loc_order")
+        # # Add order constraints (recall that order variables are descending along route):
+        # # 1) The order of a downstream node in a vehicle's route must be 1 less than the order of the upstream node if the vehicle flows along the edge
+        # m.addConstrs((2*N_R*(veh_edge_flow.sum(e, "*") - 1) + req_order[getTargetNodeId(G_flow, e)] - req_order[i] <= -1 for e, i, j in EIJ),
+        #     "req_flow_order_ub")
+        # m.addConstrs((2*N_R*(1 - veh_edge_flow.sum(e, "*")) + req_order[getTargetNodeId(G_flow, e)] - req_order[i] >= -1 for e, i, j in EIJ),
+        #     "req_flow_order_lb")
+        # # 2) The order variable for a dropoff location in vehicle's route must be less than the order of the pickup location (other constraints ensure it is same vehicle)
+        # m.addConstrs((req_order[i] - req_order[i+N_R] >= 1 for i in V_O), "dropoff after pickup")
+        # # 3) The order of the sink node is always 0 
+        # m.addConstr(req_order[sinkId] == 0, "end_loc_order")
 
-        # Add capacity constraints:
-        # 1) The occupancy of a vehicle at a downstream node is equal to the occupancy at the upstream node plus the passenger change in occupancy at the downstream node if the vehicle flows along that edge
-        m.addConstrs((veh_capacities[k]*(veh_edge_flow[e, k] - 1) + veh_occupancy[getTargetNodeId(G_flow, e), k] - veh_occupancy[i, k] <= node_occupancies[getTargetNodeId(G_flow, e)] for k in K for i in V for e in out_edges[i] if possible_flow[e, k] and getTargetNodeId(G_flow, e) != sinkId),
-            "pod_occupancy_ub")
-        m.addConstrs((veh_capacities[k]*(1 - veh_edge_flow[e, k]) + veh_occupancy[getTargetNodeId(G_flow, e), k] - veh_occupancy[i, k] >= node_occupancies[getTargetNodeId(G_flow, e)] for k in K for i in V for e in out_edges[i] if possible_flow[e, k] and getTargetNodeId(G_flow, e) != sinkId),
-            "pod_occupancy_lb")
-        # 2) The vehicle occupancy must always be less than or equal to the vehicle capacity at each node
-        m.addConstrs((veh_occupancy[i, k] <= veh_capacities[k] for i in V for k in K), "veh_capacity_constraint")
+        # # Add capacity constraints:
+        # # 1) The occupancy of a vehicle at a downstream node is equal to the occupancy at the upstream node plus the passenger change in occupancy at the downstream node if the vehicle flows along that edge
+        # # m.addConstrs((veh_capacities[k]*(veh_edge_flow[e, k] - 1) + veh_occupancy[getTargetNodeId(G_flow, e), k] - veh_occupancy[i, k] <= node_occupancies[getTargetNodeId(G_flow, e)] for k in K for i in V for e in out_edges[i] if possible_flow[e, k] and getTargetNodeId(G_flow, e) != sinkId),
+        # #     "pod_occupancy_ub")
+        # m.addConstrs((veh_capacities[k]*(1 - veh_edge_flow[e, k]) + veh_occupancy[getTargetNodeId(G_flow, e), k] - veh_occupancy[i, k] >= node_occupancies[getTargetNodeId(G_flow, e)] for k in K for i in V for e in out_edges[i] if possible_flow[e, k] and getTargetNodeId(G_flow, e) != sinkId),
+        #     "pod_occupancy_lb")
+        # # 2) The vehicle occupancy must always be less than or equal to the vehicle capacity at each node
+        # m.addConstrs((veh_occupancy[i, k] <= veh_capacities[k] for i in V for k in K), "veh_capacity_constraint")
 
         # Exactly one vehicle must be assigned to each request
         m.addConstrs((gp.quicksum([veh_edge_flow.sum(e, "*") for e in in_edges[i]]) == 1 for i in V_O), "exactly_one_assignment")
@@ -946,15 +946,22 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # Any request assigned to a vehicle that wasn't a former assignment counts as a new assignment
         m.addConstrs((req_veh_newass[i, k] + former_assignments[i, k] >= gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]]) for i in V_O for k in K),
             "added_veh_assignments")
+        # # A vehicle cannot flow directly from its origin to the sink node AND have new assignments
+        # m.addConstrs((gp.quicksum([veh_edge_flow[e, k] for e in out_edges[k] if getTargetNodeId(G_flow, e) == sinkId]) + (1/(2*N_R))*req_veh_newass.sum("*", k) <= 1 for k in K),
+        #     "prevent_cycles")
 
-        # The delay multiplier for an edge/vehicle pair is equal to the order of the downstream location in the vehicle's route as long as the vehicle traverses edge e, 0 otherwise
-        # m.addConstrs((delay_multiplier[e, k] >= req_veh_order[j, k] - 2*N_R*(1-veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
+        # # The delay multiplier for an edge/vehicle pair is equal to the order of the downstream location in the vehicle's route as long as the vehicle traverses edge e, 0 otherwise
+        # # m.addConstrs((delay_multiplier[e, k] >= req_veh_order[j, k] - 2*N_R*(1-veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
+        # #     "delay_multiplier_from_flow_and_order")
+        # m.addConstrs((delay_multiplier[e, k] >= req_order[j] - 2*N_R*(1 - veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
         #     "delay_multiplier_from_flow_and_order")
-        m.addConstrs((delay_multiplier[e, k] >= req_order[j] - 2*N_R*(1 - veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
-            "delay_multiplier_from_flow_and_order")
-        # Create a heuristic lower bound for the delay by taking the delay multipliers times the edges' travel times for all traversed edges and subtracting the time constraints for each node
-        m.addConstrs((theta[s] >= gp.quicksum([delay_multiplier.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es]) - latest_dropoffs.sum() for s in range(N_scenarios)),
-            "delay_lb_from_flow")
+        # # Create a heuristic lower bound for the delay by taking the delay multipliers times the edges' travel times for all traversed edges and subtracting the time constraints for each node
+        # m.addConstrs((theta[s] >= gp.quicksum([delay_multiplier.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es]) - latest_dropoffs.sum() for s in range(N_scenarios)),
+        #     "delay_lb_from_flow")
+
+        m.addConstrs((theta[s] >= gp.quicksum([veh_edge_flow.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es if not e["pruned"]]) - \
+                      gp.quicksum([veh_edge_flow.sum(e, "*")*latest_dropoffs[i] for e, i, j in EIJ if i in V_D and j == sinkId]) for s in range(N_scenarios)),
+                     "delay_heuristic_lb")
 
         # Optional heuristic to constrain routes to 2 request locations long at most to prevent searching inefficient routings
         m.addConstrs((req_veh_newass.sum("*", k) <= 2 for k in K),
@@ -980,10 +987,10 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
                     veh_edge_flow[e, k].start = 1
                     # m.addConstr(veh_edge_flow[flow] == 1, "fix_initial_flow_soln[{}, {}]".format(flow[0], flow[1]))
 
-                    delay_multiplier[e, k].start = initOrder[getTargetNodeId(G_flow, e), k]
+                    # delay_multiplier[e, k].start = initOrder[getTargetNodeId(G_flow, e), k]
                 else:
                     veh_edge_flow[e, k].start = 0
-                    delay_multiplier[e, k].start = 0
+                    # delay_multiplier[e, k].start = 0
 
             # for i, k in req_veh_order.keys():
             #     if (i, k) in initOrder.keys():
@@ -1002,7 +1009,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         return m, model_var_dict
 
 
-    def createSubproblemWithoutObjective(self, G_flow, subproblem_idx, heuristic_cutoff_flows=None):
+    def createSubproblemWithoutObjective(self, G_flow, subproblem_idx, heuristic_cutoff_flows=list()):
         m = gp.Model("delay-subproblem-given-routing-{}".format(subproblem_idx))
         m.setParam(GRB.Param.LogToConsole, 0)
 
@@ -1180,6 +1187,155 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         return primary_constr, secondary_constrs, pi_restrictors
 
 
+    def createCombinatorialSubproblem(self, G_flow, heuristic_cutoff_flows=list()):
+        m = gp.Model("combinatorial-subproblem-given-routing")
+        m.setParam(GRB.Param.LogToConsole, 0)
+
+        vehNodes = G_flow.vs.select(vtype="vehicle")
+        reqONodes = G_flow.vs.select(vtype="origin")
+        reqDNodes = G_flow.vs.select(vtype="destination")
+        allReqNodes = set(reqONodes) | set(reqDNodes)
+        sinkNode = G_flow.vs.find(vtype="sink")
+
+        K = [veh["nid"] for veh in vehNodes]
+        V = [req["nid"] for req in allReqNodes]
+        V_O = [req["nid"] for req in reqONodes]
+        V_D = [req["nid"] for req in reqDNodes]
+        EIJ = [(edge.index, G_flow.vs[edge.source]["nid"], G_flow.vs[edge.target]["nid"]) for edge in G_flow.es if not edge["pruned"]]
+
+        # The number of requests in the system. For an origin node index i, i+N_R is the corresponding destination node
+        N_R = len(V_O)
+
+        out_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_source=vertex.index, pruned=False)] for vertex in G_flow.vs})
+        in_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_target=vertex.index, pruned=False)] for vertex in G_flow.vs})
+
+        possible_flow = gp.tupledict({(edge.index, veh["nid"]): (G_flow.vs[edge.source]["vtype"] != "vehicle" or G_flow.vs[edge.source]["nid"] == veh["nid"]) for edge in G_flow.es for veh in vehNodes if not edge["pruned"]})
+        for e, k in heuristic_cutoff_flows:
+            possible_flow[e, k] = False
+
+        u_e = gp.tuplelist([edge.index for edge in G_flow.es])
+        v_ek = gp.tuplelist([(edge.index, veh["nid"]) for edge in G_flow.es for veh in vehNodes if possible_flow[edge.index, veh["nid"]] and edge.target is not sinkNode.index])
+        g_i = gp.tuplelist([req["nid"] for req in reqONodes])
+        h_ik = gp.tuplelist([(req["nid"], veh["nid"]) for req in allReqNodes for veh in vehNodes])
+
+        order_lb_duals = m.addVars(u_e, vtype=GRB.CONTINUOUS, name="u1", lb=0)
+        order_ub_duals = m.addVars(u_e, vtype=GRB.CONTINUOUS, name="u2", lb=0)
+        occupancy_duals = m.addVars(v_ek, vtype=GRB.CONTINUOUS, name="v", lb=0)
+        route_sequence_duals = m.addVars(g_i, vtype=GRB.CONTINUOUS, name="g", lb=0)
+        capacity_duals = m.addVars(h_ik, vtype=GRB.CONTINUOUS, name="h", lb=0)
+
+        m.update()
+
+        var_dict = dict()
+        var_dict["u1"] = order_lb_duals
+        var_dict["u2"] = order_ub_duals
+        var_dict["v"] = occupancy_duals
+        var_dict["g"] = route_sequence_duals
+        var_dict["h"] = capacity_duals
+
+        m.addConstrs((gp.quicksum([order_ub_duals[e] - order_lb_duals[e] for e in out_edges[i]]) + gp.quicksum([order_lb_duals[e] - order_ub_duals[e] for e in in_edges[i]]) + route_sequence_duals[i] == 0 for i in V_O),
+            "origin_dual_constraint")
+        m.addConstrs((gp.quicksum([order_ub_duals[e] - order_lb_duals[e] for e in out_edges[i]]) + gp.quicksum([order_lb_duals[e] - order_ub_duals[e] for e in in_edges[i]]) - route_sequence_duals[i-N_R] == 0 for i in V_D),
+            "destination_dual_constraint")
+        m.addConstrs((gp.quicksum([occupancy_duals[e, k] for e in in_edges[i] if possible_flow[e, k]]) - gp.quicksum([occupancy_duals[e, k] for e in out_edges[i] if getTargetNodeId(G_flow, e) is not sinkNode.index]) - capacity_duals[i, k] == 0 for i in V for k in K),
+            "vehicle_capacity_dual_constraint")
+        m.addConstr(gp.quicksum([order_lb_duals[e] for e in in_edges[sinkNode["nid"]]]) == 0,
+            "sink_edges_dont_count_lb")
+        m.addConstr(gp.quicksum([order_ub_duals[e] for e in in_edges[sinkNode["nid"]]]) == 0,
+            "sink_edges_dont_count_ub")
+
+        m.update()
+
+        m.setParam(GRB.Param.DualReductions, 0)
+
+        return m, var_dict
+
+
+    def updateAndSolveCombinatorialSubproblem(self, G_flow, s, lower_vars, veh_flow, upper_vars):
+        m = gp.Model("combinatorial-subproblem-given-routing")
+        m.setParam(GRB.Param.LogToConsole, 0)
+
+        vehNodes = G_flow.vs.select(vtype="vehicle")
+        reqONodes = G_flow.vs.select(vtype="origin")
+        reqDNodes = G_flow.vs.select(vtype="destination")
+        allReqNodes = set(reqONodes) | set(reqDNodes)
+        sinkNode = G_flow.vs.find(vtype="sink")
+
+        K = [veh["nid"] for veh in vehNodes]
+        V = [req["nid"] for req in allReqNodes]
+        V_O = [req["nid"] for req in reqONodes]
+        V_D = [req["nid"] for req in reqDNodes]
+        EIJ = [(edge.index, G_flow.vs[edge.source]["nid"], G_flow.vs[edge.target]["nid"]) for edge in G_flow.es if not edge["pruned"]]
+
+        # The number of requests in the system. For an origin node index i, i+N_R is the corresponding destination node
+        N_R = len(V_O)
+
+        out_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_source=vertex.index, pruned=False)] for vertex in G_flow.vs})
+        in_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_target=vertex.index, pruned=False)] for vertex in G_flow.vs})
+
+        # Create dicts for the capacity of each vehicle and the amount of space that each request takes up when picked up
+        veh_capacities = gp.tupledict({veh["nid"]: veh["capacity"] for veh in vehNodes})
+        node_occupancies = gp.tupledict({vertex["nid"]: vertex["pod"] for vertex in G_flow.vs})
+
+        # The maximum capacity of any vehicle in the network
+        max_capacity = np.max(list(veh_capacities.values()))
+
+        order_lb_duals = lower_vars["u1"]
+        order_ub_duals = lower_vars["u2"]
+        occupancy_duals = lower_vars["v"]
+        route_sequence_duals = lower_vars["g"]
+        capacity_duals = lower_vars["h"]
+
+        order_lb_obj_sum = gp.quicksum([order_lb_duals[e]*(-1 - 2*N_R*(1-gp.quicksum([np.rint(veh_flow[e, k]) for k in K if (e, k) in veh_flow.keys()]))) for e, _, _ in EIJ])
+        order_ub_obj_sum = gp.quicksum([order_ub_duals[e]*(1 - 2*N_R*(1-gp.quicksum([np.rint(veh_flow[e, k]) for k in K if (e, k) in veh_flow.keys()]))) for e, _, _ in EIJ])
+        occupancy_sum = gp.quicksum([occupancy_duals[e, k]*(-node_occupancies[j] - max_capacity*(1-np.rint(veh_flow[e, k]))) for e, _, j in EIJ for k in K if j != sinkNode.index and (e, k) in veh_flow.keys()])
+        route_sequenece_sum = route_sequence_duals.sum()
+        capacity_sum = -1*gp.quicksum([capacity_duals[i, k]*veh_capacities[k] for i in V for k in K])
+
+        objective_func = order_lb_obj_sum + order_ub_obj_sum + occupancy_sum + route_sequenece_sum + capacity_sum
+
+        s.setObjective(objective_func, GRB.MAXIMIZE)
+
+        feas_constr = s.addConstr(objective_func == 1, "enforce_feasibility")
+
+        s.update()
+        s.write("output/gurobi/combinatorial-subproblem.lp")
+
+        s.optimize()
+
+        constrs = list()
+
+        if s.status == GRB.INFEASIBLE:
+            pass
+        else:
+            assert s.status == GRB.OPTIMAL
+
+            opt_vars = dict()
+            for var_name in lower_vars.keys():
+                opt_vars[var_name] = s.getAttr("x", lower_vars[var_name])
+
+            inf_lb_indices = [e.index for e in G_flow.es if not np.isclose(opt_vars["u1"][e.index], 0.0)]
+            inf_ub_indices = [e.index for e in G_flow.es if not np.isclose(opt_vars["u2"][e.index], 0.0)]
+            inf_occupancy_indices = [(e.index, k) for e in G_flow.es for k in K if (e.index, k) in opt_vars["v"].keys() and not np.isclose(opt_vars["v"][e.index, k], 0.0)]
+
+            # assert all([np.isclose(veh_flow.sum(e, "*"), 1.0) for e in inf_lb_indices])
+            # assert all([np.isclose(veh_flow.sum(e, "*"), 1.0) for e in inf_ub_indices])
+            # assert all([np.isclose(veh_flow[e, k], 1.0) for e, k in inf_occupancy_indices])
+
+            # print("Infeasible order indices:")
+            # print([e for e in set(inf_lb_indices).union(set(inf_ub_indices))])
+            # print("Infeasible capacity indices:")
+            # print([(e, k) for e, k in inf_occupancy_indices])
+
+            if len(inf_lb_indices) > 0 or len(inf_ub_indices) > 0:
+                constrs.append(gp.quicksum([(1 - upper_vars["x"].sum(e, "*")) for e in set(inf_lb_indices).union(set(inf_ub_indices))]))
+
+            if len(inf_occupancy_indices) > 0:
+                constrs.append(gp.quicksum([(1 - upper_vars["x"][e, k]) for e, k in inf_occupancy_indices]))
+
+        return constrs, feas_constr
+
+
     def bendersDecomposition(self, G_flow, N_scenarios, arc_paths, edge_time_array, initSoln=None, weights=[1, 1, 1], seed=None, title="", T=0):
         rs = np.random.RandomState(seed)
 
@@ -1227,6 +1383,8 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         veh_edge_flow = upper_vars["x"]
         theta = upper_vars["theta"]
 
+        comb_subproblem, comb_sub_vars = self.createCombinatorialSubproblem(G_flow, heuristic_cutoff_flows)
+
         # Initialize a lower-level subproblem for each scenario to be evaluated
         scenario_dict = dict()
         for scenarioNum in range(N_scenarios):
@@ -1272,64 +1430,83 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
                 sol_routing = convertFlowAssignmentToRouting(G_flow, sol_flow)
                 print("    " + "\n    ".join(["Vehicle {}: {}".format(veh, ", ".join([str(x) for x in sol_routing[veh]])) for veh in sol_routing.keys()]))
 
-                print("  Adding benders cuts", end="", flush=True)
                 sub_t = time.time()
 
-                # constrs = list()
-                added_constrs = 0
-                sub_obj_value = 0
+                print("  Adding feasibility cuts")
+                comb_subproblem.setParam(GRB.Param.LogFile, "output/gurobi/{}-combinatorial-subproblem-{}.txt".format(title, self.benders_iter))
+                num_comb_sub_constrs = len(comb_subproblem.getConstrs())
+                comb_constrs, feas_sub_constr = self.updateAndSolveCombinatorialSubproblem(G_flow, comb_subproblem, comb_sub_vars, sol_flow, upper_vars)
 
-                for scenarioNum in range(N_scenarios):
-                    scenario_info = scenario_dict[scenarioNum]
-                    subproblem = scenario_info["model"]
-                    scenario_times = scenario_info["times"].T
-                    pi = scenario_info["vars"]["pi"]
-                    lam = scenario_info["vars"]["lambda"]
+                added_comb_constrs = 0
+                added_theta_constrs = 0
 
-                    subproblem.setParam(GRB.Param.LogFile, "output/gurobi/{}-subproblems-{}.txt".format(title, self.benders_iter))
+                for constr in comb_constrs:
+                    model.cbLazy(constr >= 1)
+                    added_comb_constrs += 1
 
-                    num_sub_constrs = len(subproblem.getConstrs())
-                    primary_constr, secondary_constrs, added_sub_constrs = self.updateAndSolveSubproblem(G_flow, subproblem, pi, lam, scenario_times, sol_flow, upper_vars)
+                comb_subproblem.remove(feas_sub_constr)
+                comb_subproblem.update()
+                assert len(comb_subproblem.getConstrs()) == num_comb_sub_constrs
 
-                    print(".", end="", flush=True)
+                if added_comb_constrs == 0:
+                    print("  Adding optimality cuts", end="", flush=True)
 
-                    model.cbLazy(theta[scenarioNum] >= primary_constr)
-                    scenario_info["constraints"].append(primary_constr)
-                    added_constrs += 1
+                    # constrs = list()
+                    sub_obj_value = 0
 
-                    for constr in secondary_constrs:
-                        model.cbLazy(theta[scenarioNum] >= constr)
-                        scenario_info["constraints"].append(constr)
-                        added_constrs += 1
+                    for scenarioNum in range(N_scenarios):
+                        scenario_info = scenario_dict[scenarioNum]
+                        subproblem = scenario_info["model"]
+                        scenario_times = scenario_info["times"].T
+                        pi = scenario_info["vars"]["pi"]
+                        lam = scenario_info["vars"]["lambda"]
 
-                    sub_obj_value += subproblem.getObjective().getValue() / N_scenarios
-                    subproblem.remove(added_sub_constrs)
-                    subproblem.update()
-                    assert len(subproblem.getConstrs()) == num_sub_constrs
+                        subproblem.setParam(GRB.Param.LogFile, "output/gurobi/{}-subproblems-{}.txt".format(title, self.benders_iter))
+
+                        num_sub_constrs = len(subproblem.getConstrs())
+                        primary_constr, secondary_constrs, added_sub_constrs = self.updateAndSolveSubproblem(G_flow, subproblem, pi, lam, scenario_times, sol_flow, upper_vars)
+
+                        print(".", end="", flush=True)
+
+                        model.cbLazy(theta[scenarioNum] >= primary_constr)
+                        scenario_info["constraints"].append(primary_constr)
+                        added_theta_constrs += 1
+
+                        for constr in secondary_constrs:
+                            model.cbLazy(theta[scenarioNum] >= constr)
+                            scenario_info["constraints"].append(constr)
+                            added_theta_constrs += 1
+
+                        sub_obj_value += subproblem.getObjective().getValue() / N_scenarios
+                        subproblem.remove(added_sub_constrs)
+                        subproblem.update()
+                        assert len(subproblem.getConstrs()) == num_sub_constrs
 
                 sub_time = time.time() - sub_t
-                print("\n    Subproblems solved in {:.1f} seconds ({} constraints added)".format(sub_time, added_constrs))
-                print("    Calculated objective value for solution: {:.2f}".format(sub_obj_value))
+                print("\n    Subproblems solved in {:.1f} seconds ({} constraints added)".format(sub_time, added_comb_constrs+added_theta_constrs))
 
-                avg_delay, scenario_delay = calcDelayFromSolution(G_flow, sol_flow, scenario_dict, T)
-                print("    Manually calculated delay at current solution: {:.2f}".format(avg_delay))
+                if added_comb_constrs == 0:
+                    print("    Calculated objective value for solution: {:.2f}".format(sub_obj_value))
 
-                routing_row = [title, sub_obj_value]
-                if len(sol_routing) > 0:
-                    for vid in range(len(G_flow.vs.select(vtype="vehicle"))):
-                        veh_route = list()
+                    avg_delay, scenario_delay = calcDelayFromSolution(G_flow, sol_flow, scenario_dict, T)
+                    print("    Manually calculated delay at current solution: {:.2f}".format(avg_delay))
 
-                        if vid in sol_routing.keys():
-                            route = sol_routing[vid]
+                    routing_row = [title, sub_obj_value]
+                    if len(sol_routing) > 0:
+                        for vid in range(len(G_flow.vs.select(vtype="vehicle"))):
+                            veh_route = list()
 
-                            for rid, pod, _, _ in route:
-                                veh_route.append((rid, pod))
+                            if vid in sol_routing.keys():
+                                route = sol_routing[vid]
 
-                        routing_row.append(veh_route)
+                                for rid, pod, _, _ in route:
+                                    veh_route.append((rid, pod))
 
-                with open(sol_routing_file, "a+", newline="") as outcsv:
-                    writer = csv.writer(outcsv)
-                    writer.writerow(routing_row)
+                            routing_row.append(veh_route)
+
+                    with open(sol_routing_file, "a+", newline="") as outcsv:
+                        writer = csv.writer(outcsv)
+                        writer.writerow(routing_row)
 
                 self.benders_iter += 1
 
