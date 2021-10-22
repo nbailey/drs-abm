@@ -877,7 +877,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         edge_dist = gp.tupledict({edge.index: np.round(edge["length"], 3) for edge in G_flow.es if not edge["pruned"]})
 
         veh_edge_flow = m.addVars(x_ek, vtype=GRB.BINARY, name="x") # 1 if vehicle k traverses edge e, 0 otherwise
-        # delay_multiplier = m.addVars(x_ek, vtype=GRB.CONTINUOUS, name="phi", lb=0) # How many times edge e's travel time counts towards delay heuristics
+        delay_multiplier = m.addVars(x_ek, vtype=GRB.CONTINUOUS, name="phi", lb=0) # How many times edge e's travel time counts towards delay heuristics
         # req_order = m.addVars(p_i, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in its assigned vehicle's route
         # req_veh_order = m.addVars(p_ik, vtype=GRB.CONTINUOUS, name="P", lb=0) # Descending order of location i's order in vehicle k's route
         # veh_occupancy = m.addVars(n_ik, vtype=GRB.CONTINUOUS, name="n", lb=0) # How many passengers are in vehicle k after it services location i
@@ -887,7 +887,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
 
         model_var_dict = {
             "x": veh_edge_flow,
-            # "phi": delay_multiplier,
+            "phi": delay_multiplier,
             # "P": req_order,
             # "P": req_veh_order,
             # "n": veh_occupancy,
@@ -957,6 +957,15 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # #     "delay_multiplier_from_flow_and_order")
         # m.addConstrs((delay_multiplier[e, k] >= req_order[j] - 2*N_R*(1 - veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
         #     "delay_multiplier_from_flow_and_order")
+
+        # The delay multiplier for an edge/vehicle pair must be at least 1 if the vehicle flows on the edge, + the delay multiplier of any downstream edge the vehicle also flows on.
+        m.addConstrs((delay_multiplier[e, k] >= veh_edge_flow[e, k] + gp.quicksum([delay_multiplier[f, k] for f in out_edges[j] if getTargetNodeId(G_flow, f) != sinkId]) - 2*N_R*(1-veh_edge_flow[e, k]) for e, _, j in EIJ for k in K if possible_flow[e, k]),
+            "delay_multiplier_from_flow")
+
+        m.addConstrs((veh_delay[k, s] >= gp.quicksum([delay_multiplier[e, k]*np.asscalar(scenario_edge_times[s][e]) for e, _, _ in EIJ if possible_flow[e, k]]) - \
+                      gp.quicksum([gp.quicksum([veh_edge_flow[e, k] for e in in_edges[i] if possible_flow[e, k]])*latest_dropoffs[i] for i in V]) for k in K for s in range(N_scenarios)),
+                     "scenario_veh_delay_heuristic")
+
         # # Create a heuristic lower bound for the delay by taking the delay multipliers times the edges' travel times for all traversed edges and subtracting the time constraints for each node
         # m.addConstrs((theta[s] >= gp.quicksum([delay_multiplier.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es]) - latest_dropoffs.sum() for s in range(N_scenarios)),
         #     "delay_lb_from_flow")
@@ -964,12 +973,11 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # m.addConstrs((theta[s] >= gp.quicksum([veh_edge_flow.sum(e.index, "*")*scenario_edge_times[s][e.index] for e in G_flow.es if not e["pruned"]]) - \
         #               gp.quicksum([veh_edge_flow.sum(e, "*")*latest_dropoffs[i] for e, i, j in EIJ if i in V_D and j == sinkId]) for s in range(N_scenarios)),
         #              "delay_heuristic_lb")
+        # m.addConstrs((veh_delay[k, s] >= gp.quicksum([veh_edge_flow[e, k]*scenario_edge_times[s][e] for e, _, _ in EIJ if possible_flow[e, k]]) - \
+        #               gp.quicksum([veh_edge_flow[e, k]*latest_dropoffs[i] for e, i, j in EIJ if possible_flow[e, k] and i in V and j == sinkId]) for k in K for s in range(N_scenarios)),
+        #              "scenario_veh_delay_heuristic")
 
-        m.addConstrs((veh_delay[k, s] >= gp.quicksum([veh_edge_flow[e, k]*scenario_edge_times[s][e] for e, _, _ in EIJ if possible_flow[e, k]]) - \
-                      gp.quicksum([veh_edge_flow[e, k]*latest_dropoffs[i] for e, i, j in EIJ if possible_flow[e, k] and i in V and j == sinkId]) for k in K for s in range(N_scenarios)),
-                     "scenario_veh_delay_heuristic")
         m.addConstrs((theta[s] >= veh_delay.sum("*", s) for s in range(N_scenarios)), "delay_heuristic_lb")
-
 
         # Optional heuristic to constrain routes to 2 request locations long at most to prevent searching inefficient routings
         m.addConstrs((req_veh_newass.sum("*", k) <= 2 for k in K),
@@ -1034,16 +1042,19 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         out_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_source=vertex.index, pruned=False)] for vertex in G_flow.vs})
         in_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_target=vertex.index, pruned=False)] for vertex in G_flow.vs})
 
-        pi_ek = gp.tuplelist([(edge.index, veh["nid"]) for edge in G_flow.es for veh in vehNodes if edge.target is not sinkNode.index])
+        # pi_ek = gp.tuplelist([(edge.index, veh["nid"]) for edge in G_flow.es for veh in vehNodes if edge.target is not sinkNode.index])
+        pi_e = gp.tuplelist([edge.index for edge in G_flow.es if edge.target is not sinkNode.index])
         lam_i = gp.tuplelist([vertex["nid"] for vertex in allReqNodes])
 
-        edge_time_duals = m.addVars(pi_ek, vtype=GRB.CONTINUOUS, name="pi{}".format(subproblem_idx), lb=0)
+        # edge_time_duals = m.addVars(pi_ek, vtype=GRB.CONTINUOUS, name="pi{}".format(subproblem_idx), lb=0)
+        edge_time_duals = m.addVars(pi_e, vtype=GRB.CONTINUOUS, name="pi{}".format(subproblem_idx), lb=0)
         node_delay_duals = m.addVars(lam_i, vtype=GRB.CONTINUOUS, name="lambda{}".format(subproblem_idx), lb=0, ub=1)
+
         possible_flow = gp.tupledict({(edge.index, veh["nid"]): (G_flow.vs[edge.source]["vtype"] != "vehicle" or G_flow.vs[edge.source]["nid"] == veh["nid"]) for edge in G_flow.es for veh in vehNodes if not edge["pruned"]})
         for e, k in heuristic_cutoff_flows:
             possible_flow[e, k] = False
 
-        m.addConstrs((gp.quicksum([edge_time_duals[e, k] for e in out_edges[i] if possible_flow[e, k] and G_flow.es[e].target is not sinkNode.index]) - gp.quicksum([edge_time_duals[e, k] for e in in_edges[i] if possible_flow[e, k]]) + node_delay_duals[i] >= 0 for i in V for k in K),
+        m.addConstrs((gp.quicksum([edge_time_duals[e] for e in out_edges[i] if G_flow.es[e].target is not sinkNode.index]) - gp.quicksum([edge_time_duals[e] for e in in_edges[i]]) + node_delay_duals[i] >= 0 for i in V for k in K),
             "edge_travel_time_dual_constraint_{}".format(subproblem_idx))
 
         m.update()
@@ -1062,10 +1073,10 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
 
         num_constrs = len(s.getConstrs())
 
-        s.setObjective(gp.quicksum([pi[e, k]*(np.asscalar(scenario_times[e]) - (1e6 * (1 - np.rint(veh_flow[e, k])))) for e, _, _  in EIJ for k in K if (e, k) in veh_flow.keys() and G_flow.es[e].target is not sinkNode.index]) - \
+        s.setObjective(gp.quicksum([pi[e]*(np.asscalar(scenario_times[e]) - (1e6 * (1 - gp.quicksum([np.rint(veh_flow[e, k]) for k in K if (e, k) in veh_flow.keys()])))) for e, _, _ in EIJ if G_flow.es[e].target is not sinkNode.index]) - \
             gp.quicksum([lam[i]*latest_dropoffs[i] for i in V]), GRB.MAXIMIZE)
 
-        pi_restrictors = s.addConstrs((pi[e, k] <= len(V)*np.rint(veh_flow[e, k]) for e, _, _ in EIJ for k in K if (e, k) in veh_flow.keys() and G_flow.es[e].target is not sinkNode.index), "pi_flow_limit")
+        pi_restrictors = s.addConstrs((pi[e] <= len(V)*gp.quicksum([np.rint(veh_flow[e, k]) for k in K if (e, k) in veh_flow.keys()]) for e, _, _ in EIJ if G_flow.es[e].target is not sinkNode.index), "pi_flow_limit")
 
         s.update()
         s.write("output/gurobi/subproblem-model.lp")
@@ -1077,122 +1088,253 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         pi_opt = s.getAttr("x", pi)
         lambda_opt = s.getAttr("x", lam)
 
-        constrained_eids = {(eid, vid): pi_opt[eid, vid] for eid, vid in pi_opt.keys() if pi_opt[eid, vid] > 0.5}
-        constrained_lambdas = {nid: lambda_opt[nid] for nid in lambda_opt.keys() if lambda_opt[nid] > 0.5}
+        constrained_pi = {eid: pi_opt[eid] for eid in pi_opt.keys() if not np.isclose(pi_opt[eid], 0.0)}
+        constrained_lam = {nid: lambda_opt[nid] for nid in lambda_opt.keys() if not np.isclose(lambda_opt[nid], 0.0)}
 
         constraint_generators = list()
 
-        # Identify which edges in constrained_eids have vehicle node at source, and select all other edges with:
-        #   - Source = a different vehicle node
-        #   - Target = the same node as this edge
-        #   - Scenario travel time >= this edge's scenario travel time
-        vids = set([v.index for v in vehNodes])
+        vids = set([veh.index for veh in vehNodes])
         veh_source_edges = G_flow.es.select(_source_in=vids)
 
         veh_node_outflows = {v["nid"]: e.index for v in vehNodes for e in veh_source_edges if (e.index, v["nid"]) in veh_flow.keys() and np.isclose(veh_flow[(e.index, v["nid"])], 1.0)}
 
-        for eid, vid in constrained_eids.keys():
-            original_edge = G_flow.es[eid]
-            original_veh = G_flow.vs.find(nid=vid)
-            original_out_edges = {e.target: e.index for e in G_flow.es.select(_source=original_veh.index)}
+        for e in constrained_pi.keys():
+            edge = G_flow.es[e]
+            src = G_flow.vs[edge.source]
+            tgt = G_flow.vs[edge.target]
 
-            if original_edge in veh_source_edges:
-                same_target_edges = veh_source_edges.select(_target=original_edge.target, _source_ne=original_edge.source)
-                for new_edge in same_target_edges:
-                    new_veh = G_flow.vs[new_edge.source]
-                    swap_out_edge = G_flow.es[veh_node_outflows[new_veh["nid"]]]
-                    swap_in_edge = G_flow.es[original_out_edges[swap_out_edge.target]]
+            # if edge in veh_source_edges:
+            #     edge_veh = src["nid"]
+            #     other_vehs = [k for k in K if k != edge_veh]
+            #     other_out_edges = {e.target: e.index for e in G_flow.es.select(_source=edge.source)}
 
-                    if np.asscalar(scenario_times[new_edge.index]) > np.asscalar(scenario_times[original_edge.index]) and np.asscalar(scenario_times[swap_in_edge.index]) > np.asscalar(scenario_times[swap_out_edge.index]):
-                        swap_constraint = constrained_eids.copy()
+            #     for k in other_vehs:
+            #         swap_src = G_flow.vs.find(nid=k)
+            #         e_swap = G_flow.es.find(_source=swap_src.index, _target=edge.target).index
 
-                        new_nid = new_veh["nid"]
-                        old_nid = original_veh["nid"]
-                        new_flow_keys = list()
+            #         v = veh_node_outflows[k]
+            #         veh_edge = G_flow.es[v]
+            #         v_swap = other_out_edges[veh_edge.target]
 
-                        swap_constraint[(swap_out_edge.index, new_nid)] = 0
-                        swap_constraint[(new_edge.index, new_nid)] = pi_opt[(original_edge.index, old_nid)]
-                        new_flow_keys.append((new_edge.index, new_nid))
+            #         if np.asscalar(scenario_times[e_swap]) >= np.asscalar(scenario_times[e]) and np.asscalar(scenario_times[v_swap]) > np.asscalar(scenario_times[v]):
+            #             swap_constraint_pi = constrained_pi.copy()
 
-                        swap_constraint[(original_edge.index, old_nid)] = 0
-                        swap_constraint[(swap_in_edge.index, old_nid)] = pi_opt[(swap_out_edge.index, old_nid)]
-                        new_flow_keys.append((swap_in_edge.index, old_nid))
+            #             swap_constraint_pi[e] = 0
+            #             swap_constraint_pi[e_swap] = pi_opt[e]
 
-                        for e, k in constrained_eids.keys():
-                            if e in (original_edge.index, new_edge.index, swap_out_edge.index, swap_in_edge.index):
-                                continue
+            #             swap_constraint_pi[v] = 0
+            #             swap_constraint_pi[v_swap] = pi_opt[v]
 
-                            if k == old_nid:
-                                swap_constraint[(e, new_nid)] = pi_opt[(e, k)]
-                                swap_constraint[(e, old_nid)] = 0
-                                new_flow_keys.append((e, new_nid))
-                            elif k == new_nid:
-                                swap_constraint[(e, old_nid)] = pi_opt[(e, k)]
-                                swap_constraint[(e, new_nid)] = 0
-                                new_flow_keys.append((e, old_nid))
+            #             constraint_generators.append((swap_constraint_pi, constrained_lam))
 
-                        if all([(e, k) in veh_flow.keys() for e, k in new_flow_keys]):
-                            constraint_generators.append((swap_constraint, constrained_lambdas))
-
-            if G_flow.vs[original_edge.source]["nid"] in V and G_flow.vs[original_edge.target]["nid"] in V:
-                original_prev_edges = [e for e in G_flow.es.select(_target=original_edge.source) if (e.index, vid) in veh_flow.keys() and np.isclose(veh_flow[e.index, vid], 1.0)]
-                assert len(original_prev_edges) == 1
-                original_prev_edge = original_prev_edges[0]
+            if src["nid"] in V and tgt["nid"] in V and src["rid"] != tgt["rid"]:
+                prev_edges = [arc for arc in G_flow.es.select(_target=edge.source) if any([np.isclose(veh_flow[arc.index, k], 1.0) for k in K if (arc.index, k) in veh_flow.keys()])]
+                assert len(prev_edges) == 1
+                prev_edge = prev_edges[0]
+                p = prev_edge.index
 
                 try:
-                    swap_prev_edge = G_flow.es.find(_source=original_prev_edge.source, _target=original_edge.target)
-                    swap_edge = G_flow.es.find(_source=original_edge.target, _target=original_edge.source)
+                    swap_prev_edge = G_flow.es.find(_source=prev_edge.source, _target=edge.target)
+                    swap_edge = G_flow.es.find(_source=edge.target, _target=edge.source)
 
-                    if (swap_prev_edge.index, vid) in veh_flow.keys() and (swap_edge.index, vid) in veh_flow.keys() and np.asscalar(scenario_times[swap_prev_edge.index]) >= np.asscalar(scenario_times[original_prev_edge.index]) + np.asscalar(scenario_times[original_edge.index]):
-                        swap_constraint = constrained_eids.copy()
+                    p_swap = swap_prev_edge.index
+                    e_swap = swap_edge.index
 
-                        swap_constraint[(original_prev_edge.index, vid)] = 0
-                        swap_constraint[(original_edge.index, vid)] = 0
-                        swap_constraint[(swap_prev_edge.index, vid)] = pi_opt[(original_prev_edge.index, vid)]
-                        swap_constraint[(swap_edge.index, vid)] = pi_opt[(original_edge.index, vid)]
+                    if np.asscalar(scenario_times[p_swap]) >= np.asscalar(scenario_times[p]) + np.asscalar(scenario_times[e]):
+                        swap_constraint_pi = constrained_pi.copy()
 
-                        constraint_generators.append((swap_constraint, constrained_lambdas))
+                        swap_constraint_pi[p] = 0
+                        swap_constraint_pi[e] = 0
+                        swap_constraint_pi[p_swap] = pi_opt[p]
+                        swap_constraint_pi[e_swap] = pi_opt[e]
 
-                except:
+                        constraint_generators.append((swap_constraint_pi, constrained_lam))
+
+                except ValueError: # swap_prev_edge or swap_edge do not exist
                     pass
 
         for k in K:
-            if pi_opt.sum("*", k).getValue() > 0:
-                veh_only_constraint_pis = constrained_eids.copy()
-                veh_rem_constraint_pis = constrained_eids.copy()
+            constrained_flow_set = set([e.index for e in G_flow.es if e.target != sinkNode.index and (e.index, k) in veh_flow.keys() and np.isclose(veh_flow[e.index, k], 1.0) and not np.isclose(pi_opt[e.index], 0.0)])
+            if len(constrained_flow_set) > 0:
+                veh_only_constraint_pi = constrained_pi.copy()
+                veh_rem_constraint_pi = constrained_pi.copy()
 
-                for eid, vid in constrained_eids.keys():
-                    if vid != k:
-                        veh_only_constraint_pis[eid, vid] = 0
+                for e in constrained_pi.keys():
+                    if (e, k) in veh_flow.keys() and np.isclose(veh_flow[e, k], 1.0):
+                        veh_rem_constraint_pi[e] = 0
+                    # We know that constrained eids have veh_flow > 0 (bc of pi_restrictors) so otherwise it must be a different vehicle
                     else:
-                        veh_rem_constraint_pis[eid, vid] = 0
+                        veh_only_constraint_pi[e] = 0
 
-                veh_only_constraint_lambdas = constrained_lambdas.copy()
-                veh_rem_constraint_lambdas = constrained_lambdas.copy()
+                veh_only_constraint_lam = constrained_lam.copy()
+                veh_rem_constraint_lam = constrained_lam.copy()
 
-                for rid in constrained_lambdas.keys():
-                    if all([not np.isclose(veh_flow[e, k], 1.0) for e in in_edges[rid] if (e ,k) in veh_flow.keys()]):
-                        veh_only_constraint_lambdas[rid] = 0
+                for rid in constrained_lam.keys():
+                    if any([np.isclose(veh_flow[e, k], 1.0) for e in in_edges[rid] if (e ,k) in veh_flow.keys()]):
+                        veh_rem_constraint_lam[rid] = 0
                     else:
-                        veh_rem_constraint_lambdas[rid] = 0
+                        veh_only_constraint_lam[rid] = 0
 
-                constraint_generators.append((veh_only_constraint_pis, veh_only_constraint_lambdas))
-                constraint_generators.append((veh_rem_constraint_pis, veh_rem_constraint_lambdas))
+                constraint_generators.append((veh_only_constraint_pi, veh_only_constraint_lam))
+                constraint_generators.append((veh_rem_constraint_pi, veh_rem_constraint_lam))
 
-        if len(constrained_eids) > 0:
-            primary_constr = gp.quicksum([constrained_eids[e, k] * (np.asscalar(scenario_times[e]) - (1e6 * (1 - upper_vars["x"][e, k]))) for e, k in constrained_eids.keys()]) - \
-                gp.quicksum([constrained_lambdas[i] * latest_dropoffs[i] for i in constrained_lambdas.keys()])
-
+        if len(constrained_pi) > 0:
+            primary_constr = gp.quicksum([constrained_pi[e] * (np.asscalar(scenario_times[e]) - (1e6 * (1 - upper_vars["x"].sum(e, "*")))) for e in constrained_pi.keys()]) - \
+                gp.quicksum([constrained_lam[i] * latest_dropoffs[i] for i in constrained_lam.keys()])
         else:
             primary_constr = gp.LinExpr(0.0)
 
         secondary_constrs = list()
-        for generator_pis, generator_lambdas in constraint_generators:
-            constr = gp.quicksum([generator_pis[e, k] * (np.asscalar(scenario_times[e]) - (1e6 * (1 - upper_vars["x"][e, k]))) for e, k in generator_pis.keys()]) - \
-                gp.quicksum([generator_lambdas[i] * latest_dropoffs[i] for i in generator_lambdas.keys()])
+        for generator_pi, generator_lam in constraint_generators:
+            constr = gp.quicksum([generator_pi[e] * (np.asscalar(scenario_times[e]) - (1e6 * (1 - upper_vars["x"].sum(e, "*")))) for e in generator_pi.keys()]) - \
+                gp.quicksum([generator_lam[i] * latest_dropoffs[i] for i in generator_lam.keys()])
             secondary_constrs.append(constr)
 
         return primary_constr, secondary_constrs, pi_restrictors
+
+
+    # def updateAndSolveSubproblem(self, G_flow, s, pi, lam, scenario_times, veh_flow, upper_vars):
+    #     vehNodes = G_flow.vs.select(vtype="vehicle")
+    #     sinkNode = G_flow.vs.find(vtype="sink")
+    #     K = [veh["nid"] for veh in vehNodes]
+    #     V = [req["nid"] for req in G_flow.vs.select(vtype_in=("origin", "destination"))]
+    #     EIJ = [(edge.index, G_flow.vs[edge.source]["nid"], G_flow.vs[edge.target]["nid"]) for edge in G_flow.es if not edge["pruned"]]
+    #     in_edges = gp.tupledict({vertex["nid"]: [edge.index for edge in G_flow.es.select(_target=vertex.index, pruned=False)] for vertex in G_flow.vs})
+    #     latest_dropoffs = gp.tupledict({vertex["nid"]: vertex["Cl"] for vertex in G_flow.vs.select(vtype_in=("origin", "destination"))})
+
+    #     num_constrs = len(s.getConstrs())
+
+    #     s.setObjective(gp.quicksum([pi[e, k]*(np.asscalar(scenario_times[e]) - (1e6 * (1 - np.rint(veh_flow[e, k])))) for e, _, _  in EIJ for k in K if (e, k) in veh_flow.keys() and G_flow.es[e].target is not sinkNode.index]) - \
+    #         gp.quicksum([lam[i]*latest_dropoffs[i] for i in V]), GRB.MAXIMIZE)
+
+    #     pi_restrictors = s.addConstrs((pi[e, k] <= len(V)*np.rint(veh_flow[e, k]) for e, _, _ in EIJ for k in K if (e, k) in veh_flow.keys() and G_flow.es[e].target is not sinkNode.index), "pi_flow_limit")
+
+    #     s.update()
+    #     s.write("output/gurobi/subproblem-model.lp")
+
+    #     s.optimize()
+
+    #     assert s.status == GRB.OPTIMAL
+
+    #     pi_opt = s.getAttr("x", pi)
+    #     lambda_opt = s.getAttr("x", lam)
+
+    #     constrained_eids = {(eid, vid): pi_opt[eid, vid] for eid, vid in pi_opt.keys() if pi_opt[eid, vid] > 0.5}
+    #     constrained_lambdas = {nid: lambda_opt[nid] for nid in lambda_opt.keys() if lambda_opt[nid] > 0.5}
+
+    #     constraint_generators = list()
+
+    #     # Identify which edges in constrained_eids have vehicle node at source, and select all other edges with:
+    #     #   - Source = a different vehicle node
+    #     #   - Target = the same node as this edge
+    #     #   - Scenario travel time >= this edge's scenario travel time
+    #     vids = set([v.index for v in vehNodes])
+    #     veh_source_edges = G_flow.es.select(_source_in=vids)
+
+    #     veh_node_outflows = {v["nid"]: e.index for v in vehNodes for e in veh_source_edges if (e.index, v["nid"]) in veh_flow.keys() and np.isclose(veh_flow[(e.index, v["nid"])], 1.0)}
+
+    #     for eid, vid in constrained_eids.keys():
+    #         original_edge = G_flow.es[eid]
+    #         original_veh = G_flow.vs.find(nid=vid)
+    #         original_out_edges = {e.target: e.index for e in G_flow.es.select(_source=original_veh.index)}
+
+    #         if original_edge in veh_source_edges:
+    #             same_target_edges = veh_source_edges.select(_target=original_edge.target, _source_ne=original_edge.source)
+    #             for new_edge in same_target_edges:
+    #                 new_veh = G_flow.vs[new_edge.source]
+    #                 swap_out_edge = G_flow.es[veh_node_outflows[new_veh["nid"]]]
+    #                 swap_in_edge = G_flow.es[original_out_edges[swap_out_edge.target]]
+
+    #                 if np.asscalar(scenario_times[new_edge.index]) > np.asscalar(scenario_times[original_edge.index]) and np.asscalar(scenario_times[swap_in_edge.index]) > np.asscalar(scenario_times[swap_out_edge.index]):
+    #                     swap_constraint = constrained_eids.copy()
+
+    #                     new_nid = new_veh["nid"]
+    #                     old_nid = original_veh["nid"]
+    #                     new_flow_keys = list()
+
+    #                     swap_constraint[(swap_out_edge.index, new_nid)] = 0
+    #                     swap_constraint[(new_edge.index, new_nid)] = pi_opt[(original_edge.index, old_nid)]
+    #                     new_flow_keys.append((new_edge.index, new_nid))
+
+    #                     swap_constraint[(original_edge.index, old_nid)] = 0
+    #                     swap_constraint[(swap_in_edge.index, old_nid)] = pi_opt[(swap_out_edge.index, old_nid)]
+    #                     new_flow_keys.append((swap_in_edge.index, old_nid))
+
+    #                     for e, k in constrained_eids.keys():
+    #                         if e in (original_edge.index, new_edge.index, swap_out_edge.index, swap_in_edge.index):
+    #                             continue
+
+    #                         if k == old_nid:
+    #                             swap_constraint[(e, new_nid)] = pi_opt[(e, k)]
+    #                             swap_constraint[(e, old_nid)] = 0
+    #                             new_flow_keys.append((e, new_nid))
+    #                         elif k == new_nid:
+    #                             swap_constraint[(e, old_nid)] = pi_opt[(e, k)]
+    #                             swap_constraint[(e, new_nid)] = 0
+    #                             new_flow_keys.append((e, old_nid))
+
+    #                     if all([(e, k) in veh_flow.keys() for e, k in new_flow_keys]):
+    #                         constraint_generators.append((swap_constraint, constrained_lambdas))
+
+    #         if G_flow.vs[original_edge.source]["nid"] in V and G_flow.vs[original_edge.target]["nid"] in V:
+    #             original_prev_edges = [e for e in G_flow.es.select(_target=original_edge.source) if (e.index, vid) in veh_flow.keys() and np.isclose(veh_flow[e.index, vid], 1.0)]
+    #             assert len(original_prev_edges) == 1
+    #             original_prev_edge = original_prev_edges[0]
+
+    #             try:
+    #                 swap_prev_edge = G_flow.es.find(_source=original_prev_edge.source, _target=original_edge.target)
+    #                 swap_edge = G_flow.es.find(_source=original_edge.target, _target=original_edge.source)
+
+    #                 if (swap_prev_edge.index, vid) in veh_flow.keys() and (swap_edge.index, vid) in veh_flow.keys() and np.asscalar(scenario_times[swap_prev_edge.index]) >= np.asscalar(scenario_times[original_prev_edge.index]) + np.asscalar(scenario_times[original_edge.index]):
+    #                     swap_constraint = constrained_eids.copy()
+
+    #                     swap_constraint[(original_prev_edge.index, vid)] = 0
+    #                     swap_constraint[(original_edge.index, vid)] = 0
+    #                     swap_constraint[(swap_prev_edge.index, vid)] = pi_opt[(original_prev_edge.index, vid)]
+    #                     swap_constraint[(swap_edge.index, vid)] = pi_opt[(original_edge.index, vid)]
+
+    #                     constraint_generators.append((swap_constraint, constrained_lambdas))
+
+    #             except:
+    #                 pass
+
+    #     for k in K:
+    #         if pi_opt.sum("*", k).getValue() > 0:
+    #             veh_only_constraint_pis = constrained_eids.copy()
+    #             veh_rem_constraint_pis = constrained_eids.copy()
+
+    #             for eid, vid in constrained_eids.keys():
+    #                 if vid != k:
+    #                     veh_only_constraint_pis[eid, vid] = 0
+    #                 else:
+    #                     veh_rem_constraint_pis[eid, vid] = 0
+
+    #             veh_only_constraint_lambdas = constrained_lambdas.copy()
+    #             veh_rem_constraint_lambdas = constrained_lambdas.copy()
+
+    #             for rid in constrained_lambdas.keys():
+    #                 if all([not np.isclose(veh_flow[e, k], 1.0) for e in in_edges[rid] if (e ,k) in veh_flow.keys()]):
+    #                     veh_only_constraint_lambdas[rid] = 0
+    #                 else:
+    #                     veh_rem_constraint_lambdas[rid] = 0
+
+    #             constraint_generators.append((veh_only_constraint_pis, veh_only_constraint_lambdas))
+    #             constraint_generators.append((veh_rem_constraint_pis, veh_rem_constraint_lambdas))
+
+    #     if len(constrained_eids) > 0:
+    #         primary_constr = gp.quicksum([constrained_eids[e, k] * (np.asscalar(scenario_times[e]) - (1e6 * (1 - upper_vars["x"][e, k]))) for e, k in constrained_eids.keys()]) - \
+    #             gp.quicksum([constrained_lambdas[i] * latest_dropoffs[i] for i in constrained_lambdas.keys()])
+
+    #     else:
+    #         primary_constr = gp.LinExpr(0.0)
+
+    #     secondary_constrs = list()
+    #     for generator_pis, generator_lambdas in constraint_generators:
+    #         constr = gp.quicksum([generator_pis[e, k] * (np.asscalar(scenario_times[e]) - (1e6 * (1 - upper_vars["x"][e, k]))) for e, k in generator_pis.keys()]) - \
+    #             gp.quicksum([generator_lambdas[i] * latest_dropoffs[i] for i in generator_lambdas.keys()])
+    #         secondary_constrs.append(constr)
+
+    #     return primary_constr, secondary_constrs, pi_restrictors
 
 
     def createCombinatorialSubproblem(self, G_flow, heuristic_cutoff_flows=list()):
