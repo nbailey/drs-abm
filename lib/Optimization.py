@@ -980,7 +980,8 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         m.addConstrs((theta[s] >= veh_delay.sum("*", s) for s in range(N_scenarios)), "delay_heuristic_lb")
 
         # Optional heuristic to constrain routes to 2 request locations long at most to prevent searching inefficient routings
-        m.addConstrs((req_veh_newass.sum("*", k) <= 2 for k in K),
+        num_new_requests = len(G_flow.vs.select(vtype="origin", veh_assigned=None))
+        m.addConstrs((req_veh_newass.sum("*", k) <= np.ceil(num_new_requests/len(K)) for k in K),
             "heuristic_limit_two_new_assignments")
 
         distWeight = weights[0] # in meters
@@ -1015,8 +1016,8 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
             #     else:
             #         req_veh_order[i, k].start = 0
 
-            for s in range(N_scenarios):
-                theta[s].start = np.sum([np.rint(np.asscalar(scenario_edge_times[s][e])) for e, _ in initFlows])
+            # for s in range(N_scenarios):
+            #     theta[s].start = np.sum([np.rint(np.asscalar(scenario_edge_times[s][e])) for e, _ in initFlows])
             #     print("Theta[{}] start value: {:.2f}".format(s, np.sum([np.rint(np.asscalar(scenario_edge_times[s][e])) for e, _ in initFlows])))
             #     # m.addConstr(theta[s] == np.sum([np.rint(np.asscalar(scenario_edge_times[s][e])) for e, _ in initFlows]), "fix_theta[{}]".format(s))
 
