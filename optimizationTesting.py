@@ -47,30 +47,40 @@ def analyzeOptResults(routes, G, vehs, reqs, T, scenario_mapping, solnTime, titl
 	routing_outpath = "output/{}-routing.csv".format(title)
 	metrics_outpath = "output/{}-metrics.csv".format(title)
 
-	veh_routing = dict()
+	out_routing = dict()
+	unmapped_routes = dict()
 
 	routing_row = [title, scenario_id, method, iteration]
 	metrics_row = [title, scenario_id, method, iteration]
 
+	scenario_veh_map = scenario_mapping["vehs"]
+	scenario_req_map = scenario_mapping["reqs"]
+	inverse_req_map = {scenario_req_map[rid]: rid for rid in scenario_req_map.keys()}
+
 	if len(routes) > 0:
-		for veh in vehs:
-			# veh_idx = scenario_mapping["vehs"][veh.id]
-			# veh_routing[veh_idx] = list()
-			veh_routing[veh.id] = list()
+		for vid in scenario_veh_map.keys():
+			scenario_vid = scenario_veh_map[vid]
 
-			if len(routes) > 0 and veh.id in routes.keys():
-				route = routes[veh.id]
+			unmapped_routes[vid] = list()
+			out_routing[scenario_vid] = list()
 
-				for rid, pod, _, _ in route:
-					# veh_routing[veh_idx].append((rid, pod))
-					veh_routing[veh.id].append((rid, pod))
+			if scenario_vid in routes.keys():
+				route = routes[scenario_vid]
+
+				for rid, pod, lng, lat in route:
+					out_routing[scenario_vid].append((rid, pod, lng, lat))
+
+					unmapped_routes[vid].append((inverse_req_map[rid], pod, lng, lat))
 
 		for veh_idx in range(len(scenario_mapping["vehs"].keys())):
-			routing_row.append(veh_routing[veh_idx])
+			routing_row.append(out_routing[veh_idx])
 
-		metrics = computeDelaysMetrics(routes, G, vehs, reqs, T)
+		metrics, arrival_times = computeDelaysMetrics(unmapped_routes, G, vehs, reqs, T)
+
+		print(unmapped_routes)
 	else:
 		metrics = [None]*len(METRIC_NAMES)
+		arrival_times = None
 
 	with open(routing_outpath, "a+", newline="") as outcsv:
 		writer = csv.writer(outcsv)
@@ -85,7 +95,11 @@ def analyzeOptResults(routes, G, vehs, reqs, T, scenario_mapping, solnTime, titl
 		writer = csv.writer(outcsv)
 		writer.writerow(metrics_row)
 
-	return veh_routing, metrics
+	if arrival_times is not None:
+		arrival_times.to_csv("output/{}-{}-scen{}-iter{}-arrival-times.csv".format(
+			title, method, scenario_id, iteration))
+
+	return out_routing, metrics
 
 
 def main():
@@ -212,6 +226,8 @@ def main():
 
 	print("Scenario information output to output/{}-scenarios.csv\n".format(args.title))
 
+	print(scenario_reverse_map)
+
 	alonsomora = AlonsoMora(params={
 		"method": "tabu",
 		"tabuMaxTime": 2,
@@ -223,28 +239,28 @@ def main():
 		print("Initializing scenario {}/{}".format(scenario_id, num_scenarios))
 		scenario_vehs, scenario_reqs = scenario_vehreqs[scenario_id]
 
-		# print("Benchmark method 1: constrained Alonso-Mora")
-		# t_start = time.time()
-		# routes, rej = alonsomora.optimizeAssignment(scenario_vehs, scenario_reqs, G)
-		# t_opt = time.time() - t_start
-		# print("Optimization finished in {:.2f} seconds".format(t_opt))
+		print("Benchmark method 1: constrained Alonso-Mora")
+		t_start = time.time()
+		routes, rej = alonsomora.optimizeAssignment(scenario_vehs, scenario_reqs, G)
+		t_opt = time.time() - t_start
+		print("Optimization finished in {:.2f} seconds".format(t_opt))
 
-		# # metrics = computeDelayMetrics(routes, G, vehs, reqs, T)
-		# results = analyzeOptResults(routes, G, vehs, reqs, T, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, "Constrained Alonso-Mora", 0)
+		# metrics = computeDelayMetrics(routes, G, vehs, reqs, T)
+		results = analyzeOptResults(routes, G, vehs, reqs, T, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, "Constrained Alonso-Mora", 0)
 
-		# unconstrainedReqs = copy.deepcopy(scenario_reqs)
-		# for req in unconstrainedReqs:
-		# 	req.Clp = 1e6
-		# 	req.Cld = 1e6
+		unconstrainedReqs = copy.deepcopy(scenario_reqs)
+		for req in unconstrainedReqs:
+			req.Clp = 1e6
+			req.Cld = 1e6
 
-		# print("Benchmark method 2: unconstrained Alonso-Mora")
-		# t_start = time.time()
-		# routes, rej = alonsomora.optimizeAssignment(scenario_vehs, unconstrainedReqs, G)
-		# t_opt = time.time() - t_start
-		# print("Optimization finished in {:.2f} seconds".format(t_opt))
+		print("Benchmark method 2: unconstrained Alonso-Mora")
+		t_start = time.time()
+		routes, rej = alonsomora.optimizeAssignment(scenario_vehs, unconstrainedReqs, G)
+		t_opt = time.time() - t_start
+		print("Optimization finished in {:.2f} seconds".format(t_opt))
 
-		# # metrics = computeDelayMetrics(routes, G, vehs, reqs, T)
-		# results = analyzeOptResults(routes, G, vehs, reqs, T, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, "Unconstrained Alonso-Mora", 0)
+		# metrics = computeDelayMetrics(routes, G, vehs, reqs, T)
+		results = analyzeOptResults(routes, G, vehs, reqs, T, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, "Unconstrained Alonso-Mora", 0)
 
 		for eval_iter in range(args.evaluations):
 			for num_samples in args.samples:
