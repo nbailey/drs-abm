@@ -1068,7 +1068,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         pi_restrictors = s.addConstrs((pi[e, k] <= len(V)*np.rint(veh_flow[e, k]) for e, _, _ in EIJ for k in K if (e, k) in veh_flow.keys() and G_flow.es[e].target is not sinkNode.index), "pi_flow_limit")
 
         s.update()
-        s.write("output/gurobi/subproblem-model.lp")
+        # s.write("output/gurobi/subproblem-model.lp")
 
         s.optimize()
 
@@ -1307,7 +1307,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         feas_constr = s.addConstr(objective_func == 1, "enforce_feasibility")
 
         s.update()
-        s.write("output/gurobi/combinatorial-subproblem.lp")
+        # s.write("output/gurobi/combinatorial-subproblem.lp")
 
         s.optimize()
 
@@ -1417,13 +1417,13 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         upper_level.setParam(GRB.Param.ResultFile, "output/gurobi/{}-final.sol".format(title))
         # upper_level.setParam(GRB.Param.TimeLimit, 4500)
 
-        sol_routing_file = "output/{}-solution-progress-routing.csv".format(title)
-        routing_headers = ["Experiment Info", "Objective Value"]
-        for i in range(len(G_flow.vs.select(vtype="vehicle"))):
-            routing_headers.append("Veh_{}_Reqs".format(i))
-        with open(sol_routing_file, "w", newline="") as outcsv:
-            writer = csv.writer(outcsv)
-            writer.writerow(routing_headers)
+        # sol_routing_file = "output/{}-solution-progress-routing.csv".format(title)
+        # routing_headers = ["Experiment Info", "Objective Value"]
+        # for i in range(len(G_flow.vs.select(vtype="vehicle"))):
+        #     routing_headers.append("Veh_{}_Reqs".format(i))
+        # with open(sol_routing_file, "w", newline="") as outcsv:
+        #     writer = csv.writer(outcsv)
+        #     writer.writerow(routing_headers)
 
         def add_benders_cuts(model, where):
             if where == GRB.Callback.MIPSOL:
@@ -1499,22 +1499,22 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
                     avg_delay, scenario_delay = calcDelayFromSolution(G_flow, sol_flow, scenario_dict, T)
                     print("    Manually calculated delay at current solution: {:.2f}".format(avg_delay))
 
-                    routing_row = [title, sub_obj_value]
-                    if len(sol_routing) > 0:
-                        for vid in range(len(G_flow.vs.select(vtype="vehicle"))):
-                            veh_route = list()
+                    # routing_row = [title, sub_obj_value]
+                    # if len(sol_routing) > 0:
+                    #     for vid in range(len(G_flow.vs.select(vtype="vehicle"))):
+                    #         veh_route = list()
 
-                            if vid in sol_routing.keys():
-                                route = sol_routing[vid]
+                    #         if vid in sol_routing.keys():
+                    #             route = sol_routing[vid]
 
-                                for rid, pod, _, _ in route:
-                                    veh_route.append((rid, pod))
+                    #             for rid, pod, _, _ in route:
+                    #                 veh_route.append((rid, pod))
 
-                            routing_row.append(veh_route)
+                    #         routing_row.append(veh_route)
 
-                    with open(sol_routing_file, "a+", newline="") as outcsv:
-                        writer = csv.writer(outcsv)
-                        writer.writerow(routing_row)
+                    # with open(sol_routing_file, "a+", newline="") as outcsv:
+                    #     writer = csv.writer(outcsv)
+                    #     writer.writerow(routing_row)
 
                 self.benders_iter += 1
 
