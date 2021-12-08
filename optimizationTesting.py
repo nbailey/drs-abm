@@ -1,16 +1,19 @@
 import argparse
 import copy
 import csv
+import importlib
+import os
+import time
+
 import igraph as ig
 import numpy as np
 import pandas as pd
-import time
 
 from lib.Agents import *
 from lib.Optimization import *
 from lib.RoutingEngine import *
 
-from scripts.analyzeRouting import METRIC_NAMES, computeDelaysMetrics
+from scripts.analyzeRouting import META_METRIC_NAMES, METRIC_NAMES, computeDelaysMetrics
 
 
 def parseReqsAndVehs(router, reqDF, vehDF, K=4):
@@ -43,7 +46,7 @@ def parseReqsAndVehs(router, reqDF, vehDF, K=4):
 	return reqs, vehs
 
 
-def analyzeOptResults(routes, G, vehs, reqs, T, scenario_mapping, solnTime, title, scenario_id, method, iteration, routing_outpath="", metrics_outpath="", arrival_times_outpath=None):
+def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, routing_outpath="", metrics_outpath="", arrival_times_outpath=None, use_meta_metrics=True):
 	if routing_outpath is not None and len(routing_outpath) == 0:
 		routing_outpath = "output/{}-routing.csv".format(title)
 	if metrics_outpath is not None and len(metrics_outpath) == 0:
@@ -54,8 +57,8 @@ def analyzeOptResults(routes, G, vehs, reqs, T, scenario_mapping, solnTime, titl
 	out_routing = dict()
 	unmapped_routes = dict()
 
-	routing_row = [title, scenario_id, method, iteration]
-	metrics_row = [title, scenario_id, method, iteration]
+	routing_row = [title, scenario_id, method, num_samples, iteration]
+	metrics_row = [title, scenario_id, method, num_samples, iteration]
 
 	scenario_veh_map = scenario_mapping["vehs"]
 	scenario_req_map = scenario_mapping["reqs"]
@@ -95,7 +98,11 @@ def analyzeOptResults(routes, G, vehs, reqs, T, scenario_mapping, solnTime, titl
 		for metric in metrics:
 			metrics_row.append(metric)
 
-		metrics_row.append(solnTime)
+		for meta_metric in META_METRIC_NAMES:
+			if use_meta_metrics and meta_metric in metadata.keys():
+				metrics_row.append(metadata[meta_metric])
+			else:
+				metrics_row.append(None)
 
 		with open(metrics_outpath, "a+", newline="") as outcsv:
 			writer = csv.writer(outcsv)
@@ -109,7 +116,7 @@ def analyzeOptResults(routes, G, vehs, reqs, T, scenario_mapping, solnTime, titl
 			threshold = arrival_times.loc[req, "Cl"]/60
 			for scenario in scenarios:
 				T = arrival_times.loc[req, scenario]/60
-				arrival_times_row = [title, scenario_id, method, iteration, req, rid, T, T-threshold, np.max([T-threshold, 0]), T > threshold]
+				arrival_times_row = [title, scenario_id, method, num_samples, iteration, req, rid, T, T-threshold, np.max([T-threshold, 0]), T > threshold]
 				arrival_times_data.append(arrival_times_row)
 
 		arrival_times_output = pd.DataFrame(arrival_times_data)
@@ -127,7 +134,8 @@ def main():
 	parser.add_argument("-SV", "--validation", help="Filepath to link speed draws (validation set)", type=str, required=False)
 	parser.add_argument("-R", "--requests", help="Filepath to pre-generated request info", type=str, required=True)
 	parser.add_argument("-V", "--vehicles", help="Filepath to pre-generated vehicle info", type=str, required=True)
-	parser.add_argument("-C", "--scenarios", help="Scenarios to evaluate: filepath or integer", type=str, required=True)
+	parser.add_argument("-C", "--config", help="Filepath to optimization configuration info", type=str, required=True)
+	parser.add_argument("-S", "--scenarios", help="Scenarios to evaluate: filepath or integer", type=str, required=True)
 	parser.add_argument("-NR", "--reqsize", help="Number of requests to include in each scenario", type=int, required=True)
 	parser.add_argument("-NV", "--vehsize", help="Number of vehicles to include in each scenario", type=int, required=True)
 	parser.add_argument("-NS", "--samples", help="Number of speed samples to draw for stocahstic optimizations", nargs="+", type=int, required=True)
@@ -163,7 +171,7 @@ def main():
 	reqs, vehs = parseReqsAndVehs(router, R, V, K=2)
 
 	routing_outpath = "output/{}-routing.csv".format(args.title)
-	routing_headers = ["Experiment", "Scenario_ID", "Method", "Iter",]
+	routing_headers = ["Experiment", "Scenario_ID", "Method_Name", "Num_Samples", "Iter",]
 	for i in range(args.vehsize):
 		routing_headers.append("Veh_{}_Reqs".format(i))
 	with open(routing_outpath, "w", newline="") as outcsv:
@@ -171,21 +179,41 @@ def main():
 		writer.writerow(routing_headers)
 
 	metrics_outpath = "output/{}-metrics.csv".format(args.title)
-	metric_headers = ["Experiment", "Scenario_ID", "Method", "Iter"]
+	metric_headers = ["Experiment", "Scenario_ID", "Method_Name", "Num_Samples", "Iter"]
 	for metric in METRIC_NAMES:
 		metric_headers.append(metric)
-	metric_headers.append("Soln_Time")
+	for meta_metric in META_METRIC_NAMES:
+		metric_headers.append(meta_metric)
 	with open(metrics_outpath, "w", newline="") as outcsv:
 		writer = csv.writer(outcsv)
 		writer.writerow(metric_headers)
 
 	arrival_times_outpath = "output/{}-arrival-times.csv".format(args.title)
-	arrival_times_headers = ["Experiment", "Scenario_ID", "Method", "Iter", "LocName", "ReqID", "Arrival_Time", "Delay", "Bounded_Delay", "Late_Arrival"]
+	arrival_times_headers = ["Experiment", "Scenario_ID", "Method", "Num_Samples", "Iter", "LocName", "ReqID", "Arrival_Time", "Delay", "Bounded_Delay", "Late_Arrival"]
 	with open(arrival_times_outpath, "w", newline="") as outcsv:
 		writer = csv.writer(outcsv)
 		writer.writerow(arrival_times_headers)
 
 	print("Preparing scenario information...")
+
+	optimization_params = list()
+
+	config_path_dir, config_path_filename = os.path.split(args.config)
+	config_module_name = ""
+	if len(config_path_dir) == 0:
+		config_module_name = config_path_filename[:-3] # Strip the trailing .py
+	else:
+		relpath = os.path.relpath(config_path_dir) # Path to the config file from this directory
+		config_module_name = relpath.replace("\\", ".") + "." + config_path_filename[:-3]
+
+	try:
+		config_module = importlib.import_module(config_module_name)
+		for config in config_module.parameters:
+			optimization_params.append(config)
+	except ModuleNotFoundError:
+		raise FileNotFoundError("No file found containing optimization config settings at {}".format(args.config))
+	except AttributeError:
+		raise ValueError("Optimization testing expected a list of dictionaries named \'parameters\' in {} but none was found".format(args.config))
 
 	scenarios = list()
 	scenario_vehreqs = dict()
@@ -255,14 +283,20 @@ def main():
 
 	print("Scenario information output to output/{}-scenarios.csv\n".format(args.title))
 
-	print(scenario_reverse_map)
+	experiment_info_row = [time.ctime(), args.title, args.config, args.graph, args.speeds, args.requests, args.vehicles, num_scenarios, args.vehsize, args.reqsize, args.seed]
+	with open("output/experiment-log.csv", "a", newline="") as outcsv:
+		writer = csv.writer(outcsv)
+		writer.writerow(experiment_info_row)
 
-	alonsomora = AlonsoMora(params={
-		"method": "tabu",
-		"tabuMaxTime": 2,
+	benchmark = AlonsoMora(params={
+		"routing_method": "enumerate",
+		"tabu_max_time": 2,
 	})
 
-	flowmatching = MinDelayFlowMatching(params=dict())
+	stochastic_optimizers = list()
+	for params in optimization_params:
+		flow_matching = MinDelayFlowMatching(params=params)
+		stochastic_optimizers.append(flow_matching)
 
 	for scenario_id in range(num_scenarios):
 		print("Initializing scenario {}/{}".format(scenario_id, num_scenarios))
@@ -283,37 +317,47 @@ def main():
 			req.Cld = 1e6
 
 		print("Benchmark method 2: unconstrained Alonso-Mora")
-		t_start = time.time()
-		routes, rej = alonsomora.optimizeAssignment(scenario_vehs, unconstrainedReqs, G)
-		t_opt = time.time() - t_start
-		print("Optimization finished in {:.2f} seconds".format(t_opt))
+		assignment, metadata = benchmark.optimizeAssignment(scenario_vehs, unconstrainedReqs, G)
 
 		# metrics = computeDelayMetrics(routes, G, vehs, reqs, T)
-		results = analyzeOptResults(routes, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, "Unconstrained Alonso-Mora", 0)
+		routes = assignment[0]
+		results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, benchmark.title, 0, 0)
 
 		for eval_iter in range(args.evaluations):
 			for num_samples in args.samples:
-				# First use weights [1,0,0] i.e. only consider the average delay
-				method = "Stoch[1,0,0] (N={})".format(num_samples)
-				print("Stochastic formulation [1,0,0] ({} samples drawn) - iteration {}".format(num_samples, eval_iter))
-				t_start = time.time()
-				routes, rej = flowmatching.optimizeAssignment(scenario_vehs, scenario_reqs, G, T_test, num_samples, weights=[1,0,0], seed=rs.randint(100000000),
-															  title="{}-scen{}-stoch[1,0,0]-N{}-iter{}".format(args.title, scenario_id, num_samples, eval_iter))
-				t_opt = time.time() - t_start
-				print("Optimization finished in {:.2f} seconds".format(t_opt))
+				# Keep the random seed (used to draw TT samples) constant across all optimizers run in one iteration
+				iter_seed = rs.randint(100000000)
 
-				results = analyzeOptResults(routes, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, method, eval_iter)
+				for optimizer_index, optimizer in enumerate(stochastic_optimizers):
+					print("Stochastic formulation, config {} ({} samples drawn) - iteration {}".format(optimizer_index, num_samples, eval_iter))
 
-				# Next use weights [1,0,16] i.e. 16 m of travel distance = 1 s of delay
-				method = "Stoch[1,0,16] (N={})".format(num_samples)
-				print("Stochastic formulation [1,0,16] ({} samples drawn) - iteration {}".format(num_samples, eval_iter))
-				t_start = time.time()
-				routes, rej = flowmatching.optimizeAssignment(scenario_vehs, scenario_reqs, G, T_test, num_samples, weights=[1,0,16], seed=rs.randint(100000000),
-															  title="{}-scen{}-stoch[1,0,16]-N{}-iter{}".format(args.title, scenario_id, num_samples, eval_iter))
-				t_opt = time.time() - t_start
-				print("Optimization finished in {:.2f} seconds".format(t_opt))
+					assignment, metadata = optimizer.optimizeAssignment(scenario_vehs, scenario_reqs, G, T_test, num_samples, seed=iter_seed,
+															   title="{}-scen{}-stoch-v{}-N{}-iter{}".format(args.title, scenario_id, optimizer_index, num_samples, eval_iter))
 
-				results = analyzeOptResults(routes, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, method, eval_iter)
+					routes = assignment[0]
+					results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, optimizer.title, num_samples, eval_iter)
+
+				# # First use weights [1,0,0] i.e. only consider the average delay
+				# method = "Stoch[0,0,1] (N={})".format(num_samples)
+				# print("Stochastic formulation [0,0,1] ({} samples drawn) - iteration {}".format(num_samples, eval_iter))
+				# t_start = time.time()
+				# routes, rej = flowmatching.optimizeAssignment(scenario_vehs, scenario_reqs, G, T_test, num_samples, seed=rs.randint(100000000),
+				# 											  title="{}-scen{}-stoch[0,0,1]-N{}-iter{}".format(args.title, scenario_id, num_samples, eval_iter))
+				# t_opt = time.time() - t_start
+				# print("Optimization finished in {:.2f} seconds".format(t_opt))
+
+				# results = analyzeOptResults(routes, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, method, eval_iter)
+
+				# # Next use weights [1,0,16] i.e. 16 m of travel distance = 1 s of delay
+				# method = "Stoch[1,0,16] (N={})".format(num_samples)
+				# print("Stochastic formulation [1,0,16] ({} samples drawn) - iteration {}".format(num_samples, eval_iter))
+				# t_start = time.time()
+				# routes, rej = flowmatching.optimizeAssignment(scenario_vehs, scenario_reqs, G, T_test, num_samples, seed=rs.randint(100000000),
+				# 											  title="{}-scen{}-stoch[1,0,16]-N{}-iter{}".format(args.title, scenario_id, num_samples, eval_iter))
+				# t_opt = time.time() - t_start
+				# print("Optimization finished in {:.2f} seconds".format(t_opt))
+
+				# results = analyzeOptResults(routes, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], t_opt, args.title, scenario_id, method, eval_iter)
 
 
 if __name__ == "__main__":
