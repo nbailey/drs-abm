@@ -204,8 +204,10 @@ def main():
 		config_module_name = config_path_filename[:-3] # Strip the trailing .py
 	else:
 		relpath = os.path.relpath(config_path_dir) # Path to the config file from this directory
-		config_module_name = relpath.replace("\\", ".") + "." + config_path_filename[:-3]
-
+		if os.name == "nt":
+			config_module_name = relpath.replace("\\", ".") + "." + config_path_filename[:-3]
+		else:
+			config_module_name = relpath.replace("/", ".") + "." + config_path_filename[:-3]
 	try:
 		config_module = importlib.import_module(config_module_name)
 		for config in config_module.parameters:
