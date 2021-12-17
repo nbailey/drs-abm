@@ -1109,71 +1109,69 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         veh_node_outflows = {v["nid"]: e.index for v in vehNodes for e in veh_source_edges if (e.index, v["nid"]) in veh_flow.keys() and np.isclose(veh_flow[(e.index, v["nid"])], 1.0)}
 
         for eid, vid in constrained_eids.keys():
-            if self.parameters["veh_swap_cuts"]:
-                original_edge = G_flow.es[eid]
-                original_veh = G_flow.vs.find(nid=vid)
-                original_out_edges = {e.target: e.index for e in G_flow.es.select(_source=original_veh.index)}
+            original_edge = G_flow.es[eid]
+            original_veh = G_flow.vs.find(nid=vid)
+            original_out_edges = {e.target: e.index for e in G_flow.es.select(_source=original_veh.index)}
 
-                if original_edge in veh_source_edges:
-                    same_target_edges = veh_source_edges.select(_target=original_edge.target, _source_ne=original_edge.source)
-                    for new_edge in same_target_edges:
-                        new_veh = G_flow.vs[new_edge.source]
-                        swap_out_edge = G_flow.es[veh_node_outflows[new_veh["nid"]]]
-                        swap_in_edge = G_flow.es[original_out_edges[swap_out_edge.target]]
+            if self.parameters["veh_swap_cuts"] and original_edge in veh_source_edges:
+                same_target_edges = veh_source_edges.select(_target=original_edge.target, _source_ne=original_edge.source)
+                for new_edge in same_target_edges:
+                    new_veh = G_flow.vs[new_edge.source]
+                    swap_out_edge = G_flow.es[veh_node_outflows[new_veh["nid"]]]
+                    swap_in_edge = G_flow.es[original_out_edges[swap_out_edge.target]]
 
-                        if np.asscalar(scenario_times[new_edge.index]) > np.asscalar(scenario_times[original_edge.index]) and np.asscalar(scenario_times[swap_in_edge.index]) > np.asscalar(scenario_times[swap_out_edge.index]):
-                            swap_constraint = constrained_eids.copy()
+                    if np.asscalar(scenario_times[new_edge.index]) > np.asscalar(scenario_times[original_edge.index]) and np.asscalar(scenario_times[swap_in_edge.index]) > np.asscalar(scenario_times[swap_out_edge.index]):
+                        swap_constraint = constrained_eids.copy()
 
-                            new_nid = new_veh["nid"]
-                            old_nid = original_veh["nid"]
-                            new_flow_keys = list()
+                        new_nid = new_veh["nid"]
+                        old_nid = original_veh["nid"]
+                        new_flow_keys = list()
 
-                            swap_constraint[(swap_out_edge.index, new_nid)] = 0
-                            swap_constraint[(new_edge.index, new_nid)] = pi_opt[(original_edge.index, old_nid)]
-                            new_flow_keys.append((new_edge.index, new_nid))
+                        swap_constraint[(swap_out_edge.index, new_nid)] = 0
+                        swap_constraint[(new_edge.index, new_nid)] = pi_opt[(original_edge.index, old_nid)]
+                        new_flow_keys.append((new_edge.index, new_nid))
 
-                            swap_constraint[(original_edge.index, old_nid)] = 0
-                            swap_constraint[(swap_in_edge.index, old_nid)] = pi_opt[(swap_out_edge.index, old_nid)]
-                            new_flow_keys.append((swap_in_edge.index, old_nid))
+                        swap_constraint[(original_edge.index, old_nid)] = 0
+                        swap_constraint[(swap_in_edge.index, old_nid)] = pi_opt[(swap_out_edge.index, old_nid)]
+                        new_flow_keys.append((swap_in_edge.index, old_nid))
 
-                            for e, k in constrained_eids.keys():
-                                if e in (original_edge.index, new_edge.index, swap_out_edge.index, swap_in_edge.index):
-                                    continue
+                        for e, k in constrained_eids.keys():
+                            if e in (original_edge.index, new_edge.index, swap_out_edge.index, swap_in_edge.index):
+                                continue
 
-                                if k == old_nid:
-                                    swap_constraint[(e, new_nid)] = pi_opt[(e, k)]
-                                    swap_constraint[(e, old_nid)] = 0
-                                    new_flow_keys.append((e, new_nid))
-                                elif k == new_nid:
-                                    swap_constraint[(e, old_nid)] = pi_opt[(e, k)]
-                                    swap_constraint[(e, new_nid)] = 0
-                                    new_flow_keys.append((e, old_nid))
+                            if k == old_nid:
+                                swap_constraint[(e, new_nid)] = pi_opt[(e, k)]
+                                swap_constraint[(e, old_nid)] = 0
+                                new_flow_keys.append((e, new_nid))
+                            elif k == new_nid:
+                                swap_constraint[(e, old_nid)] = pi_opt[(e, k)]
+                                swap_constraint[(e, new_nid)] = 0
+                                new_flow_keys.append((e, old_nid))
 
-                            if all([(e, k) in veh_flow.keys() for e, k in new_flow_keys]):
-                                constraint_generators.append((swap_constraint, constrained_lambdas))
-
-            if self.parameters["req_shuffle_cuts"]:
-                if G_flow.vs[original_edge.source]["nid"] in V and G_flow.vs[original_edge.target]["nid"] in V:
-                    original_prev_edges = [e for e in G_flow.es.select(_target=original_edge.source) if (e.index, vid) in veh_flow.keys() and np.isclose(veh_flow[e.index, vid], 1.0)]
-                    assert len(original_prev_edges) == 1
-                    original_prev_edge = original_prev_edges[0]
-
-                    try:
-                        swap_prev_edge = G_flow.es.find(_source=original_prev_edge.source, _target=original_edge.target)
-                        swap_edge = G_flow.es.find(_source=original_edge.target, _target=original_edge.source)
-
-                        if (swap_prev_edge.index, vid) in veh_flow.keys() and (swap_edge.index, vid) in veh_flow.keys() and np.asscalar(scenario_times[swap_prev_edge.index]) >= np.asscalar(scenario_times[original_prev_edge.index]) + np.asscalar(scenario_times[original_edge.index]):
-                            swap_constraint = constrained_eids.copy()
-
-                            swap_constraint[(original_prev_edge.index, vid)] = 0
-                            swap_constraint[(original_edge.index, vid)] = 0
-                            swap_constraint[(swap_prev_edge.index, vid)] = pi_opt[(original_prev_edge.index, vid)]
-                            swap_constraint[(swap_edge.index, vid)] = pi_opt[(original_edge.index, vid)]
-
+                        if all([(e, k) in veh_flow.keys() for e, k in new_flow_keys]):
                             constraint_generators.append((swap_constraint, constrained_lambdas))
 
-                    except:
-                        pass
+            if self.parameters["req_shuffle_cuts"] and G_flow.vs[original_edge.source]["nid"] in V and G_flow.vs[original_edge.target]["nid"] in V:
+                original_prev_edges = [e for e in G_flow.es.select(_target=original_edge.source) if (e.index, vid) in veh_flow.keys() and np.isclose(veh_flow[e.index, vid], 1.0)]
+                assert len(original_prev_edges) == 1
+                original_prev_edge = original_prev_edges[0]
+
+                try:
+                    swap_prev_edge = G_flow.es.find(_source=original_prev_edge.source, _target=original_edge.target)
+                    swap_edge = G_flow.es.find(_source=original_edge.target, _target=original_edge.source)
+
+                    if (swap_prev_edge.index, vid) in veh_flow.keys() and (swap_edge.index, vid) in veh_flow.keys() and np.asscalar(scenario_times[swap_prev_edge.index]) >= np.asscalar(scenario_times[original_prev_edge.index]) + np.asscalar(scenario_times[original_edge.index]):
+                        swap_constraint = constrained_eids.copy()
+
+                        swap_constraint[(original_prev_edge.index, vid)] = 0
+                        swap_constraint[(original_edge.index, vid)] = 0
+                        swap_constraint[(swap_prev_edge.index, vid)] = pi_opt[(original_prev_edge.index, vid)]
+                        swap_constraint[(swap_edge.index, vid)] = pi_opt[(original_edge.index, vid)]
+
+                        constraint_generators.append((swap_constraint, constrained_lambdas))
+
+                except:
+                    pass
 
         for k in K:
             if pi_opt.sum("*", k).getValue() > 0:
@@ -1388,7 +1386,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         # for e in G_flow.es:
         #     if G_flow.vs[e.source]["vtype"] == "vehicle" or G_flow.vs[e.target]["vtype"] == "sink" or G_flow.vs[e.source]["rid"] == G_flow.vs[e.target]["rid"] or e["pruned"]:
         #         continue
-            
+
         #     veh_edge_min_delays = dict()
         #     for veh in vehNodes:
         #         k = veh.index
@@ -1411,7 +1409,7 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
 
         # Initialize upper-level problem
         upper_level, upper_vars = self.createUpperLevelProblem(G_flow, N_scenarios, scenario_edge_times, initSoln, heuristic_cutoff_flows)
-        
+
         veh_edge_flow = upper_vars["x"]
         theta = upper_vars["theta"]
 
