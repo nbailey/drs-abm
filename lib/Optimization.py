@@ -1548,9 +1548,11 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
         upper_level.optimize(add_benders_cuts)
 
         if upper_level.status == GRB.OPTIMAL or upper_level.status == GRB.TIME_LIMIT:
-
-            veh_edges = upper_level.getAttr('x', veh_edge_flow)
-            veh_routes = convertFlowAssignmentToRouting(G_flow, veh_edges)
+            try:
+                veh_edges = upper_level.getAttr('x', veh_edge_flow)
+                veh_routes = convertFlowAssignmentToRouting(G_flow, veh_edges)
+            except gp.GurobiError:
+                veh_routes = dict()
 
         else:
 
