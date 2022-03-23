@@ -82,11 +82,7 @@ def parseReqsAndVehs(router, reqDF, vehDF, K=4, P=0):
 	return reqs, vehs
 
 
-<<<<<<< Updated upstream
-def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, routing_outpath="", metrics_outpath="", arrival_times_outpath=None):
-=======
 def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, scenario_adjustments=None, routing_outpath="", metrics_outpath="", arrival_times_outpath=None):
->>>>>>> Stashed changes
 	if routing_outpath is not None and len(routing_outpath) == 0:
 		routing_outpath = "output/{}-routing.csv".format(title)
 	if metrics_outpath is not None and len(metrics_outpath) == 0:
