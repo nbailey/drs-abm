@@ -25,10 +25,10 @@ def keep_efficient(pts):
         # find all points not dominated by i
         # since points are sorted by coordinate sum
         # i cannot dominate any points in 1,...,i-1
-        undominated[i+1:n] = ~(pts[i+1:n] >= pts[i]).all(1)
+        undominated[i+1:n] = ~(pts[i+1:] >= pts[i]).all(1)
         # keep points undominated so far
         pts = pts[undominated[:n]]
-    return pts[pts[:,0].argsort()[::1]]
+    return pts[pts[:, 0].argsort()[::1]]
 
 def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scenario, req_cols, veh_cols, all_routings_path):
     G = ig.Graph.Read_GML(graph_path)
@@ -111,6 +111,8 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
 
         average_delay = 0
         late_arrivals = 0
+        total_distance = 0
+        individual_delays = list()
 
         for v in route_dict.keys():
             veh = vehs[v]
@@ -119,6 +121,7 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
             veh_route = route_dict[v]
 
             route_tt = np.zeros(len(T))
+            route_dist = 0
             curr_loc = vnode
 
             for r, pod in veh_route:
@@ -138,61 +141,80 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
 
                 for eid in route_path:
                     route_tt += T[:, eid]
+                    route_dist += G.es[eid]["length"]
 
                 # print(np.mean(route_tt))
                 # print(Clr)
                 # print("Delay = {:.2f}".format(np.mean(np.maximum(route_tt - Clr, np.zeros(len(T))))))
                 # print("Late Arrival % = {:.1f}".format(100*np.mean(route_tt > Clr)))
 
-                average_delay += np.mean(np.maximum(route_tt - Clr, np.zeros(len(T))))
+                delay = np.maximum(route_tt - Clr, np.zeros(len(T)))
+
+                for t in delay:
+                    individual_delays.append(t)
+
+                average_delay += np.mean(delay)
                 late_arrivals += np.mean(route_tt > Clr)
 
                 curr_loc = rnode
 
+            total_distance += route_dist
+
+        route_avg_delay = np.round(average_delay/(60*2*len(reqs)), 3)
+
         route_data.append({
             "route_id": route_id,
             "route": str(route_dict),
-            "average_delay": np.round(average_delay/(60*2*len(reqs)), 3),
+            "average_delay": route_avg_delay,
             "late_arrival_pct": np.round(100*late_arrivals/(2*len(reqs)), 3),
+            "total_distance": total_distance,
+            "delay_variance": np.round(np.mean(np.power(np.array(individual_delays)/60 - route_avg_delay, 2))/(2*len(reqs)), 3)
         })
 
     routing_df = pd.DataFrame(route_data)
 
-    all_routing_pts = np.array(routing_df[["average_delay", "late_arrival_pct"]])
-    efficient_routing_pts = keep_efficient(all_routing_pts)
-    
-    efficient_assignments = list()
-    efficient_pts = list()
-
-    for i, pt in enumerate(efficient_routing_pts):
-        average_delay = pt[0]
-        late_arrival_pct = pt[1]
-
-        pt_routings = routing_df[np.isclose(routing_df["average_delay"], average_delay) & (np.isclose(routing_df["late_arrival_pct"], late_arrival_pct))]
-        for _, row in pt_routings.iterrows():
-            efficient_assignments.append(row["route"])
-            efficient_pts.append((average_delay, late_arrival_pct))
-
-        # other_indices = list(set(range(len(efficient_routing_pts))) - {i,})
-        # # print(other_indices)
-        # # if len(other_indices) > 0:
-        # #     print(efficient_routing_pts[other_indices])
-        # #     print(efficient_routing_pts[other_indices] <= pt)
-        # #     print((efficient_routing_pts[other_indices] <= pt).all(1))
-        # #     print((efficient_routing_pts[other_indices] <= pt).all(1).any())
-
-        # if len(other_indices) == 0 or not (efficient_routing_pts[other_indices] <= pt).all(1).any():
-        #     pt_routings = routing_df[np.isclose(routing_df["average_delay"], average_delay) & (np.isclose(routing_df["late_arrival_pct"], late_arrival_pct))]
-        #     for _, row in pt_routings.iterrows():
-        #         efficient_assignments.append(row["route"])
-        #         efficient_pts.append((average_delay, late_arrival_pct))
+    frontiers = {
+        "all": ["average_delay", "late_arrival_pct", "total_distance", "delay_variance"],
+        "no_var": ["average_delay", "late_arrival_pct", "total_distance"],
+        "no_dist": ["average_delay", "late_arrival_pct", "delay_variance"],
+        "no_rate": ["average_delay", "total_distance", "delay_variance"],
+        "no_delay": ["late_arrival_pct", "total_distance", "delay_variance"]
+    }
 
     scenario_metadata = {
         "avg_min_vo_dist": avg_min_vo_dist,
         "avg_od_dist": avg_od_dist,
-        "efficient_assignments": efficient_assignments,
-        "efficient_pts": efficient_pts,
     }
+
+    for frontier in frontiers.keys():
+        columns = frontiers[frontier]
+        all_routing_pts = np.array(routing_df[columns])
+        pareto_pts = keep_efficient(all_routing_pts)
+        efficient_routing_pts = pareto_pts[pareto_pts[:,0].argsort()[::1]]
+        
+        efficient_assignments = list()
+        efficient_pts = list()
+
+        for i, pt in enumerate(efficient_routing_pts):
+            average_delay = pt[0]
+            late_arrival_pct = pt[1]
+
+            other_indices = list(set(range(len(efficient_routing_pts))) - {i,})
+            # print(other_indices)
+            # if len(other_indices) > 0:
+            #     print(efficient_routing_pts[other_indices])
+            #     print(efficient_routing_pts[other_indices] <= pt)
+            #     print((efficient_routing_pts[other_indices] <= pt).all(1))
+            #     print((efficient_routing_pts[other_indices] <= pt).all(1).any())
+
+            if len(other_indices) == 0 or not (efficient_routing_pts[other_indices] <= pt).all(1).any():
+                pt_routings = routing_df[np.isclose(routing_df["average_delay"], average_delay) & (np.isclose(routing_df["late_arrival_pct"], late_arrival_pct))]
+                for _, row in pt_routings.iterrows():
+                    efficient_assignments.append(row["route"])
+                    efficient_pts.append((average_delay, late_arrival_pct))
+
+        scenario_metadata["{}_efficient_assignments".format(frontier)] = efficient_assignments
+        scenario_metadata["{}_efficient_pts".format(frontier)] = efficient_pts
 
     return scenario_metadata
 

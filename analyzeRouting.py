@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 
 import igraph as ig
@@ -250,15 +251,16 @@ def keep_efficient(pts):
     for i in range(pts.shape[0]):
         # process each point in turn
         n = pts.shape[0]
+        undominated[i] = 1
         if i >= n:
             break
         # find all points not dominated by i
         # since points are sorted by coordinate sum
         # i cannot dominate any points in 1,...,i-1
-        undominated[i+1:n] = (pts[i+1:] < pts[i]).any(1)
+        undominated[i+1:n] = ~(pts[i+1:] >= pts[i]).all(1)
         # keep points undominated so far
         pts = pts[undominated[:n]]
-    return pts
+    return pts[pts[:, 0].argsort()[::1]]
 
 
 def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scenario_metadata_dict=None):
@@ -280,11 +282,12 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 
 	reqs, vehs = parseReqsAndVehs(router, R, V)
 
-	scenarios = pd.read_csv(scenario_file, index_col=0)
+	scenarios = pd.read_csv(scenario_file)
 	
 	num_scenarios = len(scenarios)
 	scenario_reverse_map = dict()
 	scenario_frontiers = dict()
+	scenario_adjustments = dict()
 
 	req_cols = [col for col in scenarios if col.startswith('req')]
 	veh_cols = [col for col in scenarios if col.startswith('veh')]
@@ -299,6 +302,14 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 			scenario_reverse_map[scenario_id]["reqs"][scenario_rids[i]] = i
 		for j in range(len(scenario_vids)):
 			scenario_reverse_map[scenario_id]["vehs"][scenario_vids[j]] = j
+
+		if "adj_reqs" in row.keys() and "adj_vehs" in row.keys():
+			adj_reqs = eval(row["adj_reqs"])
+			adj_vehs = eval(row["adj_vehs"])
+
+			scenario_adjustments[scenario_id] = (copy.deepcopy(adj_reqs), copy.deepcopy(adj_vehs))
+		else:
+			scenario_adjustments[scenario_id] = None
 
 		# if evaluate_all_routes and all_assignments_path is not None:
 		# 	print("Evaluating the Pareto frontier for scenario {} in {}...".format(scenario_id, title))
@@ -348,11 +359,12 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 		writer.writerow(arrival_times_headers)
 
 	for _, row in routing_df.iterrows():
-		print("\nScenario {} - {}, N={} (Iter {})".format(row["Scenario_ID"], row["Method_Name"], row["Num_Samples"], row["Iter"]))
+		print("Scenario {} - {}, N={} (Iter {})".format(row["Scenario_ID"], row["Method_Name"], row["Num_Samples"], row["Iter"]))
 
 		scenario_id = row["Scenario_ID"]
 
 		reverse_map = scenario_reverse_map[scenario_id]
+		scenario_adjs = scenario_adjustments[scenario_id]
 
 		# print("Optimal Route:")
 
@@ -400,7 +412,7 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 			print(metadata)
 
 		results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, reverse_map, title, scenario_id, row["Method_Name"], row["Num_Samples"], row["Iter"],
-									routing_outpath=None, metrics_outpath=metrics_outpath, arrival_times_outpath=arrival_times_outpath)
+									scenario_adjs, routing_outpath=None, metrics_outpath=metrics_outpath, arrival_times_outpath=arrival_times_outpath)
 
 
 if __name__ == "__main__":
@@ -417,5 +429,4 @@ if __name__ == "__main__":
 	parser.add_argument("-O", "--routing", help="Filepath to routing output from experiments", type=str, required=True)
 	
 	args = parser.parse_args(sys.argv[1:])
-
 	main(args.title, args.graph, args.speeds, args.requests, args.vehicles, args.scenarios, args.routing)
