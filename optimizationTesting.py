@@ -16,7 +16,7 @@ from lib.RoutingEngine import *
 from scripts.analyzeRouting import META_METRIC_NAMES, METRIC_NAMES, computeDelaysMetrics
 
 
-def parseReqsAndVehs(router, reqDF, vehDF, K=4):
+def parseReqsAndVehs(router, reqDF, vehDF, K=4, P=0):
 	reqs = list()
 	vehs = list()
 
@@ -27,6 +27,8 @@ def parseReqsAndVehs(router, reqDF, vehDF, K=4):
 		
 		veh = Veh(int(vid), None, ini_loc=(vlng, vlat), K=K)
 		vehs.append(veh)
+
+		# print(veh)
 
 	for _, row in reqDF.iterrows():
 		rid = row[0]
@@ -43,10 +45,48 @@ def parseReqsAndVehs(router, reqDF, vehDF, K=4):
 		req = Req(router, int(rid), 0, olng, olat, dlng, dlat, constraint_dict)
 		reqs.append(req)
 
+		# print(req)
+
+	# if P > 0:
+	# 	assigned_reqs = np.random.choice(reqs, P)
+	# 	for rid, req in enumerate(assigned_reqs):
+	# 		closest_veh = None
+	# 		closest_veh_dist = np.inf
+	# 		closest_veh_time = np.inf
+			
+	# 		for vid, veh in enumerate(vehs):
+	# 			D, T = router.get_distance_duration(veh.lng, veh.lat, req.olng, req.olat, euclidean=False)
+	# 			if D < closest_veh_dist:
+	# 				closest_veh = veh
+	# 				closest_veh_dist = D
+	# 				closest_veh_time = T
+
+	# 		req.assigned = True
+	# 		req.assigned_veh = vid
+	# 		req.Clp = closest_veh_time
+
+	# 		route = [(rid, 1, req.olng, req.olat), (rid, -1, req.dlng, req.dlat)]
+	# 		veh.build_route(router, route, reqs, T=0)
+
+	# print("  Vehicle info:")
+	# for veh in vehs:
+	# 	print(veh)
+	# 	print(veh.get_passenger_requests)
+
+	# print("  Request info:")
+	# for req in reqs:
+	# 	print(req)
+	# 	print("  Assigned: {}".format(req.assigned))
+	# 	print("  Assigned Veh: {}".format(req.assigned_veh))
+
 	return reqs, vehs
 
 
+<<<<<<< Updated upstream
 def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, routing_outpath="", metrics_outpath="", arrival_times_outpath=None):
+=======
+def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, scenario_adjustments=None, routing_outpath="", metrics_outpath="", arrival_times_outpath=None):
+>>>>>>> Stashed changes
 	if routing_outpath is not None and len(routing_outpath) == 0:
 		routing_outpath = "output/{}-routing.csv".format(title)
 	if metrics_outpath is not None and len(metrics_outpath) == 0:
@@ -61,8 +101,42 @@ def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, titl
 	metrics_row = [title, scenario_id, method, num_samples, iteration]
 
 	scenario_veh_map = scenario_mapping["vehs"]
+	inverse_veh_map = {scenario_veh_map[vid]: vid for vid in scenario_veh_map.keys()}
+
 	scenario_req_map = scenario_mapping["reqs"]
 	inverse_req_map = {scenario_req_map[rid]: rid for rid in scenario_req_map.keys()}
+
+	if scenario_adjustments is not None:
+		adj_reqs = scenario_adjustments[0]
+		adj_vehs = scenario_adjustments[1]
+
+		# print("Reqs:")
+		# print(adj_reqs)
+		# print(scenario_req_map)
+		# print(inverse_req_map)
+
+		# print("\n\nVehs:")
+		# print(adj_vehs)
+		# print(scenario_veh_map)
+		# print(inverse_veh_map)
+
+		for adj_rid in adj_reqs.keys():
+			req = adj_reqs[adj_rid]
+			rid = inverse_req_map[req["rid"]]
+			reqs[rid].Cep = req["Cep"]
+			reqs[rid].Clp = req["Clp"]
+			reqs[rid].Ced = req["Ced"]
+			reqs[rid].Cld = req["Cld"]
+			reqs[rid].olng = req["olng"]
+			reqs[rid].olat = req["olat"]
+			reqs[rid].dlng = req["dlng"]
+			reqs[rid].dlat = req["dlat"]
+
+		for adj_vid in adj_vehs.keys():
+			veh = adj_vehs[adj_vid]
+			vid = inverse_veh_map[veh["vid"]]
+			vehs[vid].lng = veh["lng"]
+			vehs[vid].lat = veh["lat"]
 
 	if len(routes) > 0:
 		for vid in scenario_veh_map.keys():
@@ -138,6 +212,7 @@ def main():
 	parser.add_argument("-NS", "--samples", help="Number of speed samples to draw for stocahstic optimizations", nargs="+", type=int, required=True)
 	parser.add_argument("-NE", "--evaluations", help="Number of evaluations to run for each scenario", type=int, required=True)
 	parser.add_argument("--seed", help="Random seed used", type=int)
+	parser.add_argument("-P", "--passengers", help="Number of requests that are already assigned to their closest vehicle (default: 0)", type=int, default=0)
 
 	args = parser.parse_args()
 
@@ -165,7 +240,7 @@ def main():
 	else:
 		rs = np.random.RandomState()
 
-	reqs, vehs = parseReqsAndVehs(router, R, V, K=2)
+	reqs, vehs = parseReqsAndVehs(router, R, V, K=2, P=args.passengers)
 
 	routing_outpath = "output/{}-routing.csv".format(args.title)
 	routing_headers = ["Experiment", "Scenario_ID", "Method_Name", "Num_Samples", "Iter",]
@@ -217,6 +292,7 @@ def main():
 	scenarios = list()
 	scenario_vehreqs = dict()
 	scenario_reverse_map = dict()
+	scenario_adjustments = dict()
 
 	if args.scenarios.isdecimal():
 		num_scenarios = int(args.scenarios)
@@ -244,6 +320,45 @@ def main():
 			for j, veh in enumerate(scenario_vehs):
 				veh.id = j
 
+			if args.passengers > 0:
+				passenger_rids = rs.choice(range(len(scenario_rids)), args.passengers, replace=False)
+				for rid in passenger_rids:
+					req = scenario_reqs[rid]
+
+					closest_veh = None
+					closest_veh_dist = np.inf
+					closest_veh_time = np.inf
+
+					for vid, veh in enumerate(scenario_vehs):
+						D, T = router.get_distance_duration(veh.lng, veh.lat, req.olng, req.olat, euclidean=False)
+						veh_reqs, wait_reqs = veh.get_passenger_requests()
+						num_veh_pax = len(veh_reqs) + len(wait_reqs)
+						if num_veh_pax == 0 and D < closest_veh_dist:
+							closest_veh = veh
+							closest_veh_dist = D
+							closest_veh_time = T
+
+					req.assigned = True
+					req.assigned_veh = closest_veh.id
+					# req.Clp = closest_veh_time
+					req.Clp -= 60
+
+					route = [(rid, 1, req.olng, req.olat), (rid, -1, req.dlng, req.dlat)]
+					closest_veh.build_route(router, route, reqs, T=0)
+
+				adj_reqs = dict()
+				for i, req in enumerate(scenario_reqs):
+					adj_reqs[i] = {"rid": req.id, "Cep": req.Cep, "Clp": req.Clp, "Ced": req.Ced, "Cld": req.Cld,
+								   "olng": req.olng, "olat": req.olat, "dlng": req.dlng, "dlat": req.dlat}
+				scenario["adj_reqs"] = str(adj_reqs)
+
+				adj_vehs = dict()
+				for j, veh in enumerate(scenario_vehs):
+					adj_vehs[j] = {"vid": veh.id, "lng": veh.lng, "lat": veh.lat}
+				scenario["adj_vehs"] = str(adj_vehs)
+
+				scenario_adjustments[scenario_id] = (copy.deepcopy(adj_reqs), copy.deepcopy(adj_vehs))
+
 			scenario_vehreqs[scenario_id] = (scenario_vehs, scenario_reqs)
 			scenarios.append(scenario)
 	else:
@@ -252,7 +367,6 @@ def main():
 		req_cols = [col for col in scenarios if col.startswith('req')]
 		veh_cols = [col for col in scenarios if col.startswith('veh')]
 		for scenario_id, row in scenarios.iterrows():
-			print("  Loading Scenario {}/{}".format(scenario_id, num_scenarios))
 			scenario_rids = list(row[req_cols])
 			scenario_reqs = [copy.deepcopy(reqs[rid]) for rid in scenario_rids]
 
@@ -274,6 +388,45 @@ def main():
 				req.id = i
 			for j, veh in enumerate(scenario_vehs):
 				veh.id = j
+
+			if args.passengers > 0:
+				passenger_rids = rs.choice(range(len(scenario_rids)), args.passengers, replace=False)
+				for rid in passenger_rids:
+					req = scenario_reqs[rid]
+
+					closest_veh = None
+					closest_veh_dist = np.inf
+					closest_veh_time = np.inf
+
+					for vid, veh in enumerate(scenario_vehs):
+						D, T = router.get_distance_duration(veh.lng, veh.lat, req.olng, req.olat, euclidean=False)
+						veh_reqs, wait_reqs = veh.get_passenger_requests()
+						num_veh_pax = len(veh_reqs) + len(wait_reqs)
+						if num_veh_pax == 0 and D < closest_veh_dist:
+							closest_veh = veh
+							closest_veh_dist = D
+							closest_veh_time = T
+
+					req.assigned = True
+					req.assigned_veh = closest_veh.id
+					# req.Clp = closest_veh_time
+					req.Clp -= 60
+
+					route = [(rid, 1, req.olng, req.olat), (rid, -1, req.dlng, req.dlat)]
+					closest_veh.build_route(router, route, reqs, T=0)
+
+				adj_reqs = dict()
+				for i, req in enumerate(scenario_reqs):
+					adj_reqs[i] = {"rid": req.id, "Cep": req.Cep, "Clp": req.Clp, "Ced": req.Ced, "Cld": req.Cld,
+								   "olng": req.olng, "olat": req.olat, "dlng": req.dlng, "dlat": req.dlat}
+				scenario["adj_reqs"] = str(adj_reqs)
+
+				adj_vehs = dict()
+				for j, veh in enumerate(scenario_vehs):
+					adj_vehs[j] = {"vid": veh.id, "lng": veh.lng, "lat": veh.lat}
+				scenario["adj_vehs"] = str(adj_vehs)
+
+				scenario_adjustments[scenario_id] = (copy.deepcopy(adj_reqs), copy.deepcopy(adj_vehs))
 
 			scenario_vehreqs[scenario_id] = (scenario_vehs, scenario_reqs)
 
@@ -300,6 +453,7 @@ def main():
 	for scenario_id in range(num_scenarios):
 		print("Initializing scenario {}/{}".format(scenario_id, num_scenarios))
 		scenario_vehs, scenario_reqs = scenario_vehreqs[scenario_id]
+		scenario_adjs = scenario_adjustments[scenario_id]
 
 		# print("Benchmark method 1: constrained Alonso-Mora")
 		# t_start = time.time()
@@ -320,7 +474,14 @@ def main():
 
 		# metrics = computeDelayMetrics(routes, G, vehs, reqs, T)
 		routes = assignment[0]
-		results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, benchmark.title, 0, 0)
+
+		# Add any pre-assigned vehicle routes back into the routing dictionary, which only returns routes for vehicles with new assignments
+		for veh in scenario_vehs:
+			if veh.id not in routes.keys() and len(veh.route) > 0:
+				routes[veh.id] = [(leg.rid, leg.pod, leg.tlng, leg.tlat) for leg in veh.route]
+
+		# results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, benchmark.title, 0, 0, scenario_adjs)
+		results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, benchmark.title, 0, 0, scenario_adjs, arrival_times_outpath="")
 
 		for eval_iter in range(args.evaluations):
 			for num_samples in args.samples:
@@ -334,7 +495,9 @@ def main():
 															   title="{}-scen{}-stoch-v{}-N{}-iter{}".format(args.title, scenario_id, optimizer_index, num_samples, eval_iter))
 
 					routes = assignment[0]
-					results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, optimizer.title, num_samples, eval_iter)
+
+					# results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, optimizer.title, num_samples, eval_iter, scenario_adjs)
+					results = analyzeOptResults(routes, metadata, G, vehs, reqs, T_val, scenario_reverse_map[scenario_id], args.title, scenario_id, optimizer.title, num_samples, eval_iter, scenario_adjs, arrival_times_outpath="")
 
 				# # First use weights [1,0,0] i.e. only consider the average delay
 				# method = "Stoch[0,0,1] (N={})".format(num_samples)

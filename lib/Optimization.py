@@ -63,7 +63,15 @@ class VehReqMatchingAssignment(AssignmentMethod):
             assignment = self.assignFromRTVGraph(rtvGraph)
             assTime = time.time() - t
             print("  Assignment completed in {:.2f} seconds!".format(assTime))
-            return assignment, {"solve_time": assTime}
+
+            metadata = {
+                "benders_iters": 0,
+                "total_feas_cuts": 0,
+                "total_opt_cuts": 0,
+                "solve_time": assTime
+            }
+
+            return assignment, metadata
         else:
             return (list(), list()), {"solve_time": 0}
 
@@ -408,7 +416,11 @@ class FlowNetworkMatchingAssignment(AssignmentMethod):
         flowTime = time.time() - t
         print("  Flow network successfully generated  in {:.2f} seconds! |V|={}, |E|={}".format(flowTime, len(G_flow.vs), len(G_flow.es)))
         # G_flow.write("output/graphs/{}-flow-graph-{}.gml".format(title, T), "gml")
+<<<<<<< Updated upstream
         # print("    Written to output/graphs/{}-rv-assignment-{}.gml".format(title, T))
+=======
+        print("    Written to output/graphs/{}-rv-assignment-{}.gml".format(title, T))
+>>>>>>> Stashed changes
 
         initSoln = self.findInitialFeasibleSolution(G_flow, G_road, T)
 
@@ -987,9 +999,13 @@ class MinDelayFlowMatching(FlowNetworkMatchingAssignment):
                          "scenario_veh_delay_heuristic")
             m.addConstrs((theta[s] >= veh_delay.sum("*", s) for s in range(N_scenarios)), "delay_heuristic_lb")
 
-        # Optional heuristic to constrain routes to 2 request locations long at most to prevent searching inefficient routings
-        m.addConstrs((req_veh_newass.sum("*", k) <= 2 for k in K),
-            "heuristic_limit_two_new_assignments")
+        # Optional heuristic to constrain routes to 2 added request locations long at most to prevent searching inefficient routings
+        # m.addConstrs((req_veh_newass.sum("*", k) <= 2 for k in K),
+        #     "heuristic_limit_two_new_assignments")
+
+        # Optional heuristic to constrain routes to 2 total request locations long at most to prevent searching inefficient routings
+        m.addConstrs((req_veh_newass.sum("*", k) + former_assignments.sum("*", k) <= 2 for k in K),
+            "heuristic_limit_two_total_assignments")
 
         weights = self.parameters["weights"]
         distWeight = weights[0] # in meters

@@ -95,7 +95,7 @@ PRICE_KM = 0.527
 PRICE_DISC = 0.75
 
 # Whether the link travel times use a triangular distribution (tt_opt, tt_avg, tt_pes) or not
-LINK_UNCERTAINTY = True
+LINK_UNCERTAINTY = False
 UNCERTAINTY_MULTIPLIER = 1.5
 
 # Whether the vehicles know the link travel time ahead of insertion or afterwards
