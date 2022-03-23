@@ -386,28 +386,21 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 		if len(scenario_metadata_dict) > 0:
 			scenario_metadata = scenario_metadata_dict[scenario_id]
 
-			frontier_assignments = scenario_metadata["efficient_assignments"]
-
-			# print("Pareto Frontier Routes:")
-			# for i, assignment in enumerate(frontier_assignments):
-			# 	frontier_route = eval(assignment)
-			# 	print("{}.".format(i+1))
-			# 	for vid in frontier_route.keys():
-			# 		print("  {} | {}".format(vid, " -> ".join([str(x) for x in frontier_route[vid]])))
+			frontiers = scenario_metadata["frontiers"]
 
 			avg_min_vo_dist = scenario_metadata["avg_min_vo_dist"]
 			avg_od_dist = scenario_metadata["avg_od_dist"]
 
-			# print("\n".join(frontier_assignments))
-			simplified_route = str({vid: [(rid, pod) for rid, pod, tlng, tlat in routes[vid]] for vid in routes.keys()})
-			# print(simplified_route)
-			# print(simplified_route in frontier_assignments)
-
 			metadata = {
-				"On_Frontier": simplified_route in frontier_assignments,
-				"Avg_Min_VO_Dist:": avg_min_vo_dist,
+				"Avg_Min_VO_Dist": avg_min_vo_dist,
 				"Avg_OD_Dist": avg_od_dist,
 			}
+
+			for frontier in frontiers.keys():
+				frontier_assignments = scenario_metadata["{}_efficient_assignments".format(frontier)]
+
+				simplified_route = str({vid: [(rid, pod) for rid, pod, tlng, tlat in routes[vid]] for vid in routes.keys()})
+				metadata["On_{}_Frontier".format(frontier.capitalize())] = simplified_route in frontier_assignments
 
 			print(metadata)
 

@@ -182,6 +182,7 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
     }
 
     scenario_metadata = {
+        "frontiers": frontiers,
         "avg_min_vo_dist": avg_min_vo_dist,
         "avg_od_dist": avg_od_dist,
     }
