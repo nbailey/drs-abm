@@ -46,7 +46,7 @@ def parseReqsAndVehs(router, reqDF, vehDF, K=4):
 	return reqs, vehs
 
 
-def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, routing_outpath="", metrics_outpath="", arrival_times_outpath=None, use_meta_metrics=True):
+def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, title, scenario_id, method, num_samples, iteration, routing_outpath="", metrics_outpath="", arrival_times_outpath=None):
 	if routing_outpath is not None and len(routing_outpath) == 0:
 		routing_outpath = "output/{}-routing.csv".format(title)
 	if metrics_outpath is not None and len(metrics_outpath) == 0:
@@ -84,7 +84,7 @@ def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, titl
 
 		metrics, arrival_times = computeDelaysMetrics(unmapped_routes, G, vehs, reqs, T)
 
-		print(unmapped_routes)
+		# print(unmapped_routes)
 	else:
 		metrics = [None]*len(METRIC_NAMES)
 		arrival_times = None
@@ -98,11 +98,8 @@ def analyzeOptResults(routes, metadata, G, vehs, reqs, T, scenario_mapping, titl
 		for metric in metrics:
 			metrics_row.append(metric)
 
-		for meta_metric in META_METRIC_NAMES:
-			if use_meta_metrics and meta_metric in metadata.keys():
-				metrics_row.append(metadata[meta_metric])
-			else:
-				metrics_row.append(None)
+		for meta_metric in metadata.keys():
+			metrics_row.append(metadata[meta_metric])
 
 		with open(metrics_outpath, "a+", newline="") as outcsv:
 			writer = csv.writer(outcsv)

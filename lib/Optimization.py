@@ -407,8 +407,8 @@ class FlowNetworkMatchingAssignment(AssignmentMethod):
         G_flow, arc_paths = self.generateFlowNetwork(vehs, reqs, G_road)
         flowTime = time.time() - t
         print("  Flow network successfully generated  in {:.2f} seconds! |V|={}, |E|={}".format(flowTime, len(G_flow.vs), len(G_flow.es)))
-        G_flow.write("output/graphs/{}-flow-graph-{}.gml".format(title, T), "gml")
-        print("    Written to output/graphs/{}-rv-assignment-{}.gml".format(title, T))
+        # G_flow.write("output/graphs/{}-flow-graph-{}.gml".format(title, T), "gml")
+        # print("    Written to output/graphs/{}-rv-assignment-{}.gml".format(title, T))
 
         initSoln = self.findInitialFeasibleSolution(G_flow, G_road, T)
 
