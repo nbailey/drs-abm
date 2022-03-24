@@ -197,22 +197,19 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
         efficient_pts = list()
 
         for i, pt in enumerate(efficient_routing_pts):
-            average_delay = pt[0]
-            late_arrival_pct = pt[1]
-
             other_indices = list(set(range(len(efficient_routing_pts))) - {i,})
-            # print(other_indices)
-            # if len(other_indices) > 0:
-            #     print(efficient_routing_pts[other_indices])
-            #     print(efficient_routing_pts[other_indices] <= pt)
-            #     print((efficient_routing_pts[other_indices] <= pt).all(1))
-            #     print((efficient_routing_pts[other_indices] <= pt).all(1).any())
 
             if len(other_indices) == 0 or not (efficient_routing_pts[other_indices] <= pt).all(1).any():
-                pt_routings = routing_df[np.isclose(routing_df["average_delay"], average_delay) & (np.isclose(routing_df["late_arrival_pct"], late_arrival_pct))]
+                metric_matches = list()
+                for i, metric in enumerate(columns):
+                    metric_matches.append(np.isclose(routing_df[metric], pt[i]))
+
+                pt_routings = routing_df[np.logical_and.reduce(metric_matches)]
+
+                # pt_routings = routing_df[np.isclose(routing_df["average_delay"], average_delay) & (np.isclose(routing_df["late_arrival_pct"], late_arrival_pct))]
                 for _, row in pt_routings.iterrows():
                     efficient_assignments.append(row["route"])
-                    efficient_pts.append((average_delay, late_arrival_pct))
+                    efficient_pts.append([x for x in pt])
 
         scenario_metadata["{}_efficient_assignments".format(frontier)] = efficient_assignments
         scenario_metadata["{}_efficient_pts".format(frontier)] = efficient_pts

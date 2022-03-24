@@ -99,9 +99,10 @@ for _, row in X.iterrows():
 frontiers = list()
 for g, r, v, s in metadata_dict.keys():
 	for scenario_identifier in metadata_dict[g, r, v, s].keys():
-		for assignment in metadata_dict[g, r, v, s][scenario_identifier]["efficient_assignments"]:
-			frontier_info = {"Graph_File": g, "Input_Requests": r, "Input_Vehicles": v, "Scenarios": s, "Scenario_Identifier": scenario_identifier, "Assignment": assignment}
-			frontiers.append(frontier_info)
+		for frontier in metadata_dict[g,r,v,s][scenario_identifier]["frontiers"].keys():
+			for assignment in metadata_dict[g, r, v, s][scenario_identifier]["{}_efficient_assignments".format(frontier)]:
+				frontier_info = {"Graph_File": g, "Input_Requests": r, "Input_Vehicles": v, "Scenarios": s, "Scenario_Identifier": scenario_identifier, "Frontier": frontier, "Assignment": assignment}
+				frontiers.append(frontier_info)
 
 frontier_df = pd.DataFrame(frontiers)
 frontier_df.to_csv(experiment_log.replace(".csv", "-pareto-frontiers.csv"))

@@ -343,11 +343,15 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 		metric_headers.append(metric)
 
 	if len(scenario_metadata_dict) > 0:
-		metric_headers.append("On_Pareto_Frontier")
 		metric_headers.append("Avg_Min_VO_Dist")
 		metric_headers.append("Avg_OD_Dist")
+		metric_headers.append("On_All_Pareto_Frontier")
+		metric_headers.append("On_NoVar_Pareto_Frontier")
+		metric_headers.append("On_NoDist_Pareto_Frontier")
+		metric_headers.append("On_NoRate_Pareto_Frontier")
+		metric_headers.append("On_NoDelay_Pareto_Frontier")
 
-	metric_headers.append("Soln_Time")
+	# metric_headers.append("Soln_Time")
 	with open(metrics_outpath, "w", newline="") as outcsv:
 		writer = csv.writer(outcsv)
 		writer.writerow(metric_headers)
