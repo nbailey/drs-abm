@@ -104,6 +104,8 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
     avg_od_dist = np.mean([reqs[r]["od_dist"] for r in reqs.keys()])
 
     route_data = list()
+    route_distances = dict()
+    route_delay_vars = dict()
 
     for _, route in all_possible_routes.iterrows():
         route_id = route["ID"]
@@ -171,6 +173,9 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
             "delay_variance": np.round(np.mean(np.power(np.array(individual_delays)/60 - route_avg_delay, 2))/(2*len(reqs)), 3)
         })
 
+        route_distances[str(route_dict)] = total_distance
+        route_delay_vars[str(route_dict)] = np.round(np.mean(np.power(np.array(individual_delays)/60 - route_avg_delay, 2))/(2*len(reqs)), 3)
+
     routing_df = pd.DataFrame(route_data)
 
     frontiers = {
@@ -185,6 +190,8 @@ def generateMetadata(graph_path, requests_path, vehicles_path, speeds_path, scen
         "frontiers": frontiers,
         "avg_min_vo_dist": avg_min_vo_dist,
         "avg_od_dist": avg_od_dist,
+        "route_distances": route_distances,
+        "route_delay_vars": route_delay_vars,
     }
 
     for frontier in frontiers.keys():

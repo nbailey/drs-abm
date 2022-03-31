@@ -380,14 +380,9 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 
 		metadata = dict()
 
-		# if scenario_id in scenario_frontiers.keys():
-		# 	frontier_assignments = scenario_frontiers[scenario_id]
-		# 	if routes in frontier_assignments:
-		# 		metadata["On_Frontier"] = True
-		# 	else:
-		# 		metadata["On_Frontier"] = False
-
 		if len(scenario_metadata_dict) > 0:
+			simplified_route = str({vid: [(rid, pod) for rid, pod, tlng, tlat in routes[vid]] for vid in routes.keys()})
+
 			scenario_metadata = scenario_metadata_dict[scenario_id]
 
 			frontiers = scenario_metadata["frontiers"]
@@ -395,15 +390,18 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 			avg_min_vo_dist = scenario_metadata["avg_min_vo_dist"]
 			avg_od_dist = scenario_metadata["avg_od_dist"]
 
+			route_distances = scenario_metadata["route_distances"]
+			route_delay_vars = scenario_metadata["route_delay_vars"]
+
 			metadata = {
 				"Avg_Min_VO_Dist": avg_min_vo_dist,
 				"Avg_OD_Dist": avg_od_dist,
+				"Total_Distance": route_distances[simplified_route],
+				"Delay_Variance": route_delay_vars[simplified_route],
 			}
 
 			for frontier in frontiers.keys():
 				frontier_assignments = scenario_metadata["{}_efficient_assignments".format(frontier)]
-
-				simplified_route = str({vid: [(rid, pod) for rid, pod, tlng, tlat in routes[vid]] for vid in routes.keys()})
 				metadata["On_{}_Frontier".format(frontier.capitalize())] = simplified_route in frontier_assignments
 
 			print(metadata)
