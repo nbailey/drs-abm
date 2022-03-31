@@ -8,8 +8,8 @@ import pandas as pd
 experiment_log = sys.argv[1]
 benchmark_log = "benchmark-experiment-log.csv"
 
-benchmark_output = "output/complete-benchmark-combined-metrics.csv"
-benchmark_arrival_output = "output/complete-benchmark-combined-arrival-summary.csv"
+benchmark_output = "output/final-benchmark-combined-metrics.csv"
+benchmark_arrival_output = "output/final-benchmark-combined-arrival-summary.csv"
 experiment_output = "output/" + experiment_log[:-7] + "combined-metrics.csv" # replace "log.csv" with "combined-metrics.csv"
 arrival_output = "output/" + experiment_log[:-7] + "combined-arrival-summary.csv"
 
@@ -32,7 +32,7 @@ for title in set(experiments["Experiment_Title"]):
 	# colnames = pd.read_csv(data_filepath, nrows=1)
 	# experiment_metrics[title] = pd.read_csv(data_filepath, header=None, skiprows=1, usecols=list(range(len(colnames.columns))), names=colnames.columns)
 	experiment_metrics[title] = pd.read_csv(data_filepath)
-	experiment_metric_names[title] = list(experiment_metrics[title].columns)[5:-1]
+	experiment_metric_names[title] = list(experiment_metrics[title].columns)[5:]
 
 if os.path.exists(benchmark_output):
 	prev_output = pd.read_csv(benchmark_output, index_col=False)

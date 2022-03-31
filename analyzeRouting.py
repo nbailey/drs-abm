@@ -345,6 +345,8 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 	if len(scenario_metadata_dict) > 0:
 		metric_headers.append("Avg_Min_VO_Dist")
 		metric_headers.append("Avg_OD_Dist")
+		metric_headers.append("Total_Distance")
+		metric_headers.append("Delay Variance")
 		metric_headers.append("On_All_Pareto_Frontier")
 		metric_headers.append("On_NoVar_Pareto_Frontier")
 		metric_headers.append("On_NoDist_Pareto_Frontier")
@@ -357,7 +359,7 @@ def main(title, graph, speeds, requests, vehicles, scenario_file, routing, scena
 		writer.writerow(metric_headers)
 
 	arrival_times_outpath = "output/{}-validation-arrival-times.csv".format(title)
-	arrival_times_headers = ["Experiment", "Scenario_ID", "Method_Name", "Num_Samples", "Iter", "LocName", "ReqID", "Arrival_Time", "Delay", "Bounded_Delay", "Late_Arrival", "On_Frontier"]
+	arrival_times_headers = ["Experiment", "Scenario_ID", "Method_Name", "Num_Samples", "Iter", "LocName", "ReqID", "Arrival_Time", "Delay", "Bounded_Delay", "Late_Arrival"]
 	with open(arrival_times_outpath, "w", newline="") as outcsv:
 		writer = csv.writer(outcsv)
 		writer.writerow(arrival_times_headers)
