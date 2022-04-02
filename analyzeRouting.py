@@ -14,11 +14,12 @@ from lib.RoutingEngine import *
 from optimizationTesting import parseReqsAndVehs, analyzeOptResults
 
 
-METRIC_NAMES = ["CRVI", "Certain_Delayed_Trip_Count", "Raw_Delay", "Bounded_Delay", "Late_Arrival_Pct"]
+METRIC_NAMES = ["CRVI", "Certain_Delayed_Trip_Count", "Raw_Delay", "Bounded_Delay", "Late_Arrival_Pct", "Total_Distance", "Avg_Arrival_Time_Variance"]
 
 def pathsFromRouting(routing, G, vehs):
 	# Create dict of requests and the edge paths needed to reach their origin and destination
 	reqPaths = dict()
+	total_length = 0
 
 	for vid in routing.keys():
 		try:
@@ -48,7 +49,9 @@ def pathsFromRouting(routing, G, vehs):
 			olng = tlng
 			olat = tlat
 
-	return reqPaths
+			total_length += np.sum([G.es[eid]["length"] for eid in legPath])
+
+	return reqPaths, total_length
 
 
 def arrivalTimesFromPaths(paths, edge_time_table, reqs):
@@ -128,7 +131,7 @@ def calcCVI(T, l):
 
 
 def computeDelaysMetrics(routing, G, vehs, reqs, edge_time_table):
-	req_paths = pathsFromRouting(routing, G, vehs)
+	req_paths, total_length = pathsFromRouting(routing, G, vehs)
 	arrival_times = arrivalTimesFromPaths(req_paths, edge_time_table, reqs)
 
 	scenarios = list(arrival_times.columns[2:])
@@ -138,6 +141,7 @@ def computeDelaysMetrics(routing, G, vehs, reqs, edge_time_table):
 	raw_delays = list()
 	bounded_delays = list()
 	late_arrivals = list()
+	arrival_time_variances = list()
 
 	for req in list(arrival_times.index):	
 		rid = arrival_times.loc[req, "rid"]
@@ -156,14 +160,16 @@ def computeDelaysMetrics(routing, G, vehs, reqs, edge_time_table):
 		raw_delays.append(np.mean(T - threshold))
 		bounded_delays.append(np.mean(np.maximum(T - threshold, np.zeros(len(T)))))
 		late_arrivals.append(np.sum(T > threshold) / len(T))
+		arrival_time_variances.append(np.var(T))
 
 	cvi_sum = np.sum(CVIs)
 	cdt_sum = np.sum(CDTs)
 	raw_delay_mean = np.mean(raw_delays)
 	bnd_delay_mean = np.mean(bounded_delays)
 	exp_late_arrivals = np.sum(late_arrivals)
+	avg_arrival_time_variance = np.mean(arrival_time_variances)
 
-	metrics = (cvi_sum, cdt_sum, raw_delay_mean, bnd_delay_mean, exp_late_arrivals)
+	metrics = (cvi_sum, cdt_sum, raw_delay_mean, bnd_delay_mean, exp_late_arrivals, total_length, avg_arrival_time_variance)
 
 	return metrics, arrival_times
 	# return np.sum(CVIs), np.mean(raw_delays), np.mean(bounded_delays), np.sum(late_arrivals)
